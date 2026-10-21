@@ -36,7 +36,7 @@ export function skipDraft(store, id, { now, why = "" }) {
   return { ok: true, message: m };
 }
 
-export async function sendDraft(store, id, { now, config, provider }) {
+export async function sendDraft(store, id, { now, config, provider, approved = false }) {
   const m = store.outbound.find((x) => x.id === id);
   if (!m) return { ok: false, reason: "NOT_FOUND" };
   if (m.status !== "draft") return { ok: false, reason: "NOT_A_DRAFT", detail: m.status };
@@ -45,7 +45,9 @@ export async function sendDraft(store, id, { now, config, provider }) {
     return { ok: false, reason: "DRAFTS_MODE", detail: 'set mode to "auto" in data/config.json to send automatically' };
   // Even in auto mode, only the templates listed in config.autoTemplates may go
   // out on their own. A missing list means none (fail closed).
-  if (!provider.dryRun && !(config.autoTemplates || []).includes(m.template))
+  // `approved` = Jamal picked this exact draft by id from his phone. It lifts
+  // only the autoTemplates limit; every check below still runs.
+  if (!provider.dryRun && !approved && !(config.autoTemplates || []).includes(m.template))
     return { ok: false, reason: "TEMPLATE_NOT_AUTO", detail: `${m.template} is not in autoTemplates; send it yourself` };
 
   const lead = m.leadId ? store.leads[m.leadId] : null;

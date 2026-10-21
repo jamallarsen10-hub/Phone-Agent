@@ -15,6 +15,8 @@ import { notionClient, syncNotion, GRACE_MS } from "./notion.js";
 import { autoState, autoTick } from "./auto.js";
 import { macMessagesProvider } from "./providers/macMessages.js";
 import { toE164, prettyPhone } from "./phone.js";
+import { runPipe } from "./pipe.js";
+import { withStoreLock } from "./lock.js";
 import { toCSV } from "./csv.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -38,6 +40,7 @@ Setup and fixes:
   handled <phone>            You answered their reply; follow-ups may resume
   skip <id> [--why "..."]    Drop a draft you will not send
   status                     Counts, opt-outs, open replies
+  pipe "<text>"              One phone command (due, send <id>, sold <name>…); used by Mac Remote
   send --dry-run             Run drafts through the automatic path without sending
   auto [--once] [--live]     Confirmations and reminders on your Mac. Dry run unless mode is "auto" AND --live
 
@@ -253,6 +256,30 @@ async function main() {
       return;
     }
 
+    case "pipe": {
+      // Mac Remote passes the phone message as ONE argument (never split, never a shell).
+      const text = [...args].join(" ").slice(0, 300);
+      let provider = null;
+      if (config.mode === "auto" && !config.killSwitch && process.platform === "darwin") {
+        try {
+          provider = macMessagesProvider();
+        } catch {}
+      }
+      try {
+        const out = await withStoreLock(DATA, async () => {
+          const s = loadStore(DATA);
+          const r = await runPipe(text, s, { now, config, provider });
+          if (r.changed) saveStore(DATA, s);
+          return r;
+        });
+        console.log(out.reply);
+      } catch (e) {
+        console.log(e.code === "STORE_BUSY" ? "Busy saving, try again in a minute." : `Error: ${e.message}`);
+        process.exitCode = 1;
+      }
+      return;
+    }
+
     case "auto": {
       const state = autoState(config, { live: Boolean(flags.live) });
       for (const n of state.notes) console.log(n);
@@ -278,8 +305,10 @@ async function main() {
           const r = await syncNotion(DATA, config, client, { now: t, graceMs: GRACE_MS });
           if (!r.ok) console.log(`Notion not reachable (${r.error}). Using the leads already saved.`);
         }
-        const s = loadStore(DATA);
-        const rep = await autoTick(s, { now: t, config, provider, persist: () => saveStore(DATA, s) });
+        const rep = await withStoreLock(DATA, async () => {
+          const s = loadStore(DATA);
+          return autoTick(s, { now: t, config, provider, persist: () => saveStore(DATA, s) });
+        });
         const stamp = t.toISOString();
         for (const m of rep.sent) console.log(`${stamp} sent [${m.id}] ${m.template} to ${prettyPhone(m.to)}`);
         for (const m of rep.wouldSend)

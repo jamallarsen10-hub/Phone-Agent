@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { networkInterfaces } from "node:os";
 import { loadStore, saveStore } from "./store.js";
+import { withStoreLock } from "./lock.js";
 import { buildDrafts } from "./drafts.js";
 import { renderPage } from "./page.js";
 import { runAction } from "./actions.js";
@@ -102,9 +103,12 @@ export function startServer({ dataDir, config, port = 4777, lan = false, nowFn =
       if (req.method === "GET" && url.pathname === "/") {
         const now = nowFn();
         await syncIfStale(now, url.searchParams.has("refresh"));
-        const store = loadStore(dataDir);
-        const result = buildDrafts(store, { now, config });
-        saveStore(dataDir, store);
+        const { store, result } = await withStoreLock(dataDir, async () => {
+          const store = loadStore(dataDir);
+          const result = buildDrafts(store, { now, config });
+          saveStore(dataDir, store);
+          return { store, result };
+        });
         const fresh = undo && now - undo.at < UNDO_MS ? undo : null;
         const html = renderPage(store, result, { now, config, live: { key, undoLabel: fresh && fresh.label } });
         return send(res, 200, html, "text/html; charset=utf-8");
@@ -114,6 +118,7 @@ export function startServer({ dataDir, config, port = 4777, lan = false, nowFn =
         if (!sameKey(req.headers["x-pa-key"])) return send(res, 403, "Missing key.");
         const body = await readJSON(req);
         const now = nowFn();
+        return await withStoreLock(dataDir, async () => {
         const store = loadStore(dataDir);
 
         if (body.action === "undo") {
@@ -131,6 +136,7 @@ export function startServer({ dataDir, config, port = 4777, lan = false, nowFn =
         undo = { snapshot, label: r.label, at: now };
         log(`[command center] ${r.label}`);
         return sendJSON(res, 200, r);
+        });
       }
 
       return send(res, 404, "Not found.");
