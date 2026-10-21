@@ -15,18 +15,26 @@ import { localDate } from "./dates.js";
  * Lead outcomes (sold, lost, showed, no-show) are kept in fields the CDK
  * import never touches, so a stale export can't undo a tap.
  */
+/**
+ * What a sent text changes on the lead: Last Contact, the touch, and the
+ * write-back queued for Notion. Shared by the Sent tap and the automatic path,
+ * so a text sent automatically is recorded exactly like one you sent by hand.
+ */
+export function recordSentEffects(store, m, { now, config }) {
+  const lead = m.leadId && store.leads[m.leadId];
+  if (!lead) return;
+  const today = localDate(now, config.timeZone);
+  const change = changesForSent(lead, m.template, TOUCH_OF[m.template], { today, config });
+  lead.lastContact = today;
+  if (!queueChange(store, lead, change, { now }) && change.followUp) lead.followUpDate = change.followUp;
+}
+
 export const ACTIONS = {
   sent: ({ id }, store, { now, config }) => {
     const r = markSent(store, id, { now });
     if (!r.ok) return r;
     const m = r.message;
-    const lead = m.leadId && store.leads[m.leadId];
-    if (lead) {
-      const today = localDate(now, config.timeZone);
-      const change = changesForSent(lead, m.template, TOUCH_OF[m.template], { today, config });
-      lead.lastContact = today;
-      if (!queueChange(store, lead, change, { now }) && change.followUp) lead.followUpDate = change.followUp;
-    }
+    recordSentEffects(store, m, { now, config });
     return { ok: true, label: `Logged text to ${who(store, m)}` };
   },
 

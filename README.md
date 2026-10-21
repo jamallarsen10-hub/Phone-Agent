@@ -12,7 +12,7 @@ Everything lands in the **Command Center**, a private page in the same look as y
 
 Undo covers the last tap.
 
-Automatic sending uses the same engine and the same gate. It stays off until a texting provider and 10DLC registration are in place (see **Not built yet**).
+Automatic sending uses the same engine and the same gate. It stays off until you switch it on, and then it only covers confirmations and reminders (see **Automatic confirmations and reminders on your Mac**).
 
 Zero dependencies. Plain Node 18+. Nothing hosted, no accounts, $0.
 
@@ -114,6 +114,58 @@ Every text passes through one gate (`src/guardrails.js`). Nothing else decides w
 - **Sold, delivered, lost, and dead leads are skipped**, and so are leads with an appointment today or later.
 - **Kill switch**: `KILL_SWITCH=true node src/cli.js drafts` produces nothing.
 
+## Automatic confirmations and reminders on your Mac
+
+**This ships OFF.** Nothing is texted automatically until you turn it on, and it only ever sends three kinds of text: the booking confirmation, the night-before reminder, and the 2-hour reminder, to people who booked and were told on the booking page that you'd text them about the visit. Follow-ups, no-show texts, CDK sequences and everything else stay drafts that you send yourself.
+
+**Not tested on a Mac yet.** This was built on Linux and has never been run against a real Messages app. Two things are unknown until you try it: whether the SMS route still works on your version of macOS (including the newest), and whether the Mac has to be awake or unlocked while it sends. Your first live test decides both.
+
+### How it works
+
+`auto` builds today's drafts, keeps only the three allowed templates (`autoTemplates` in `data/config.json`), and hands each one to the Messages app on your Mac. Messages relays it as a normal SMS from your iPhone, so it comes from your number and uses your own plan. It costs $0.
+
+- Every text goes through the same gate as always, checked again at the moment of sending: permission, STOP, hours, no prices, daily limits, and your kill switch.
+- If a Notion token is set, `auto` pulls new bookings from Notion every 2 minutes, and writes each text back (Touches Sent, Last Contact) exactly as the **Sent** tap does.
+- It waits about 5 seconds between texts.
+- The message and phone number reach AppleScript as arguments, never inside the script, so nothing in a name or template can change what the script does.
+
+### Two switches, both required
+
+1. `"mode": "auto"` in `data/config.json`
+2. `--live` on the command
+
+With only one of them, or with `KILL_SWITCH=true`, `auto` runs as a dry run: it prints what it would text and texts no one.
+
+### What the Mac and iPhone need
+
+- Messages is signed in to your Apple ID. `auto` launches it if it isn't running.
+- iPhone: Settings → Messages → Text Message Forwarding → turn on for this Mac. The iPhone has to be on and connected.
+- The Mac stays on while it runs (leave `auto` running in a window).
+- First run only: macOS will ask to let Terminal (or whatever runs `node`) control Messages. If you missed it: System Settings → Privacy & Security → Automation.
+
+### First run, in this order
+
+1. **Dry run:** `node src/cli.js auto --once`. It lists the texts it would send. Nothing is sent.
+2. **One real text to yourself, in a separate data folder so no customer can be texted.** Make a one-row export with your own number, an appointment date in the future and `OK to Text` = Y, for example:
+
+   ```
+   Customer Name,Cell Phone,Vehicle of Interest,Status,Appt Date,OK to Text
+   Test Me,(your number),RAV4 Hybrid,Appointment Set,10/30/2026,Y
+   ```
+
+   Then, with `PHONE_AGENT_DATA=~/pa-test/data` in front of each command: `import` that file, put `{ "mode": "auto" }` in `~/pa-test/data/config.json`, and run `node src/cli.js auto --once --live` during sending hours (Mon–Sat, 9 AM–8 PM).
+3. **Check what arrived on your phone.** It should be a green SMS bubble, not a blue iMessage. If it didn't arrive, or came as iMessage, stop. The one place to change is `APPLESCRIPT_LINES` in `src/providers/macMessages.js`.
+4. Only after that, switch to your real data folder.
+
+### If something goes wrong
+
+- Any error from Messages stops the run and marks that text **failed**. It is never retried automatically, because Messages can't confirm delivery and a retry could text a customer twice. Check Messages, then tap **Sent** or **Skip** in the Command Center.
+- A text that was cut off mid-send is held the same way (`UNKNOWN_OUTCOME`), never re-sent.
+- Messages can't report delivery, and iMessage can quietly take over from SMS, so "sent" here means Messages accepted it.
+- `serve` and `auto` use the same data file. A tap and an automatic send in the same second could collide. Rare, but if you notice something missing, stop `auto`, then re-run `sync`.
+
+Whether Woburn Toyota is fine with this is still your call (see **Not built yet**). None of this is legal advice. Confirm texting rules with the dealership before turning on automatic sending.
+
 ## CDK export columns
 
 Header matching ignores case and punctuation. Unknown columns are listed and ignored. Nothing is ever deleted on re-import, and a blank cell never erases what was there.
@@ -153,6 +205,7 @@ handled <phone>             you answered; follow-ups may resume
 skip <id> [--why "..."]     drop a draft
 status                      counts and settings
 send --dry-run              run drafts through the automatic path; prints, sends nothing
+auto [--once] [--live]      confirmations and reminders via Messages on your Mac; a dry run unless mode is "auto" AND --live
 ```
 
 ## Where things live
@@ -165,6 +218,8 @@ src/priceBlock.js   price/finance denylist
 src/drafts.js       who is due today, one per number, idempotent
 src/inbound.js      handles replies: dedup, STOP first, handoff to you
 src/send.js         log a manual send, or the automatic path
+src/auto.js         the `auto` pass: allowlisted texts only, two switches, never double-sends
+src/providers/macMessages.js   sends through Messages on a Mac (osascript, arguments only)
 src/leads.js        CSV import and merge
 src/notion.js       Notion pull, write-back queue, and the 75-second grace period
 src/page.js         the Command Center page (booking-site look)
@@ -182,7 +237,7 @@ Customer data never goes in git: `data/`, `out/` and every `*.csv` except the ex
 
 1. **Merge the booking-page branch.** `jamal-booking-site` branch `claude/booking-text-loop` records texting permission with every booking and adds the optional follow-ups checkbox. It changes the live site, so it waits for your review.
 2. **Dealership policy.** Confirm Woburn Toyota is fine with you texting customers from a system like this, and whether the sender is you or the dealership.
-3. **Provider and 10DLC.** Automatic sending needs one provider (Twilio or Telnyx) plus US carrier registration (brand + campaign). Check current fees and timelines on the provider's own pages. Until then, `mode` stays `"drafts"`.
+3. **Automatic sending.** The free Mac route is built but untested (see **Automatic confirmations and reminders on your Mac**), and `mode` stays `"drafts"` until you switch it on. Texting through Twilio or Telnyx instead would need US carrier registration (10DLC: brand + campaign). Check current fees and timelines on the provider's own pages.
 4. **Sending hours.** Confirm the 9 AM–8 PM, Mon–Sat window.
 
 None of this is legal advice. Confirm texting rules with the dealership before turning on automatic sending.
@@ -193,7 +248,7 @@ None of this is legal advice. Confirm texting rules with the dealership before t
 npm test
 ```
 
-56 tests. They cover:
+70 tests. They cover:
 - STOP edge cases, START/HELP, and buying signals
 - price blocking and template rules
 - quiet hours across DST, the daily limit at midnight, and shared phone numbers
@@ -201,3 +256,5 @@ npm test
 - a full CLI day on the sample export
 - the Command Center's lock (no key, wrong host, or a cross-site tap are all refused), and undo
 - a booking run end to end against a fake Notion: confirm → Sent → write-back (merging touches, keeping links in Notes) → reminders → STOP, plus Undo never reaching Notion
+- the Mac sender: message and number passed as arguments (a hostile message can't change the script), refuses to run off a Mac, bad numbers never reach osascript, the pause between texts
+- the automatic pass: ships off, both switches needed, kill switch, STOP, quiet hours, only the three allowed templates, never a double send, a failed send stops the run and is never retried

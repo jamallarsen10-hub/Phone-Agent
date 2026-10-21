@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { TEMPLATES } from "./templates.js";
 
 /**
  * Defaults. Override any of these in data/config.json (gitignored) or with
@@ -34,6 +35,11 @@ export const DEFAULTS = Object.freeze({
   // "drafts" = Jamal sends from his own phone. "auto" needs a real provider.
   mode: "drafts",
   killSwitch: false,
+  // The ONLY templates the automatic path may send, even when mode is "auto".
+  // These are template keys (see src/templates.js), not Notion touch names:
+  // the confirmation text is "booking-confirm". Everything else stays a draft
+  // you send yourself.
+  autoTemplates: Object.freeze(["booking-confirm", "reminder-night", "reminder-2h"]),
 });
 
 export function loadConfig(dataDir, env = process.env) {
@@ -65,4 +71,8 @@ export function validateConfig(cfg) {
     throw new Error("sendDays must be weekday numbers 0-6");
   if (!["drafts", "auto"].includes(cfg.mode)) throw new Error('mode must be "drafts" or "auto"');
   if (!(cfg.maxPerPhonePerDay >= 1)) throw new Error("maxPerPhonePerDay must be at least 1");
+  if (!Array.isArray(cfg.autoTemplates)) throw new Error("autoTemplates must be a list of template names");
+  const unknown = cfg.autoTemplates.filter((t) => !Object.prototype.hasOwnProperty.call(TEMPLATES, t));
+  if (unknown.length)
+    throw new Error(`autoTemplates has unknown template(s): ${unknown.join(", ")}. Known: ${Object.keys(TEMPLATES).join(", ")}`);
 }

@@ -11,7 +11,9 @@ import { handleInbound } from "./inbound.js";
 import { markSent, skipDraft, sendDraft, dryRunProvider } from "./send.js";
 import { runAction } from "./actions.js";
 import { startServer } from "./server.js";
-import { notionClient, syncNotion } from "./notion.js";
+import { notionClient, syncNotion, GRACE_MS } from "./notion.js";
+import { autoState, autoTick } from "./auto.js";
+import { macMessagesProvider } from "./providers/macMessages.js";
 import { toE164, prettyPhone } from "./phone.js";
 import { toCSV } from "./csv.js";
 
@@ -37,6 +39,7 @@ Setup and fixes:
   skip <id> [--why "..."]    Drop a draft you will not send
   status                     Counts, opt-outs, open replies
   send --dry-run             Run drafts through the automatic path without sending
+  auto [--once] [--live]     Confirmations and reminders on your Mac. Dry run unless mode is "auto" AND --live
 
 Options:  --now 2026-10-20T10:00:00-04:00   pretend it is another time (testing)
 Env:      KILL_SWITCH=true stops every text. PHONE_AGENT_DATA, PHONE_AGENT_OUT move folders.`;
@@ -248,6 +251,55 @@ async function main() {
       }
       saveStore(DATA, store);
       return;
+    }
+
+    case "auto": {
+      const state = autoState(config, { live: Boolean(flags.live) });
+      for (const n of state.notes) console.log(n);
+      let provider;
+      if (state.live) {
+        try {
+          provider = macMessagesProvider();
+        } catch (e) {
+          fail(e.message);
+        }
+      } else provider = dryRunProvider(() => {}); // we print our own, deduplicated lines below
+      const client = config.notionToken ? notionClient({ token: config.notionToken }) : null;
+      const SYNC_EVERY_MS = 2 * 60 * 1000;
+      let lastSync = -Infinity;
+      const shown = new Set();
+      let first = true;
+
+      for (;;) {
+        const t = flags.now ? now : new Date();
+        // Bookings arrive in Notion, so pull them in (and push back saved taps) every couple of minutes.
+        if (client && t.getTime() - lastSync >= SYNC_EVERY_MS) {
+          lastSync = t.getTime();
+          const r = await syncNotion(DATA, config, client, { now: t, graceMs: GRACE_MS });
+          if (!r.ok) console.log(`Notion not reachable (${r.error}). Using the leads already saved.`);
+        }
+        const s = loadStore(DATA);
+        const rep = await autoTick(s, { now: t, config, provider, persist: () => saveStore(DATA, s) });
+        const stamp = t.toISOString();
+        for (const m of rep.sent) console.log(`${stamp} sent [${m.id}] ${m.template} to ${prettyPhone(m.to)}`);
+        for (const m of rep.wouldSend)
+          if (!shown.has(m.id)) {
+            shown.add(m.id);
+            console.log(`${stamp} would text ${prettyPhone(m.to)} (${m.template}): ${m.body}`);
+          }
+        for (const m of rep.failed)
+          console.error(`${stamp} FAILED [${m.id}] ${m.template} to ${prettyPhone(m.to)}: ${m.detail}. Marked failed and will NOT be retried. Check whether it went out before sending it by hand.`);
+        if (first) {
+          const held = rep.held.map((m) => `${m.template}: ${m.reason}`);
+          console.log(
+            `${stamp} first pass: ${rep.sent.length + rep.wouldSend.length} ready, ${rep.held.length} held${held.length ? " (" + [...new Set(held)].join("; ") + ")" : ""}, ${rep.notAuto.length} left as drafts for you.`
+          );
+          first = false;
+        }
+        if (rep.stop) fail("Stopped after a failed send. Fix Messages, then start auto again.");
+        if (flags.once) return;
+        await new Promise((r) => setTimeout(r, 60 * 1000));
+      }
     }
 
     default:

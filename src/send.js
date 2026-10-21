@@ -10,8 +10,9 @@ import { priceFlags } from "./priceBlock.js";
  *
  * sendDraft(): the automatic path. Re-runs the full gate at the moment of
  * sending, including quiet hours and a fresh price check, then hands off to
- * a provider. The only provider shipped is the dry-run one; a real one is a
- * later decision (Twilio or Telnyx, after 10DLC registration).
+ * a provider. Providers shipped: the dry-run one, and src/providers/macMessages.js
+ * (Messages on a Mac, off unless mode is "auto" and `auto --live` is used).
+ * Only templates in config.autoTemplates may be sent this way.
  */
 export function markSent(store, id, { now, via = "manual" }) {
   const m = store.outbound.find((x) => x.id === id);
@@ -42,6 +43,10 @@ export async function sendDraft(store, id, { now, config, provider }) {
   if (!provider) return { ok: false, reason: "NO_PROVIDER" };
   if (config.mode !== "auto" && !provider.dryRun)
     return { ok: false, reason: "DRAFTS_MODE", detail: 'set mode to "auto" in data/config.json to send automatically' };
+  // Even in auto mode, only the templates listed in config.autoTemplates may go
+  // out on their own. A missing list means none (fail closed).
+  if (!provider.dryRun && !(config.autoTemplates || []).includes(m.template))
+    return { ok: false, reason: "TEMPLATE_NOT_AUTO", detail: `${m.template} is not in autoTemplates; send it yourself` };
 
   const lead = m.leadId ? store.leads[m.leadId] : null;
   const check = canSend(store, { lead, phone: m.phone, template: m.template }, { now, config, checkHours: true });

@@ -229,7 +229,8 @@ test("sendDraft: real provider needs auto mode; unknown outcome never retries", 
   const [d] = buildDrafts(s, ctx).drafts;
   const flaky = { name: "test", async send() { throw new Error("timeout"); } };
   assert.equal((await sendDraft(s, d.id, { ...ctx, provider: flaky })).reason, "DRAFTS_MODE");
-  const auto = { ...ctx, config: config({ mode: "auto" }) };
+  // The follow-up template is not auto-sendable by default (see test/mac.test.js), so allow it for this test only.
+  const auto = { ...ctx, config: config({ mode: "auto", autoTemplates: ["lead-followup"] }) };
   assert.equal((await sendDraft(s, d.id, { ...auto, provider: flaky })).reason, "PROVIDER_ERROR");
   assert.equal(s.outbound[0].status, "failed");
   assert.equal((await sendDraft(s, d.id, { ...auto, provider: flaky })).reason, "NOT_A_DRAFT");
