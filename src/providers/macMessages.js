@@ -25,11 +25,12 @@ const DEFAULT_TIMEOUT_MS = 30000;
 
 /**
  * THE ONE PLACE TO ADJUST if the first live test fails (research notes):
- *  - Pick the SMS service with `1st service whose service type = SMS`.
- *    `service "SMS"` can throw error -10002 on macOS 11 and later, and leaving
- *    the service out sends as iMessage instead of SMS.
- *  - `buddy <phone> of s` is the older form. If a newer macOS rejects it,
- *    `participant <phone> of s` is the usual replacement.
+ *  - Pick the SMS account with `1st account whose service type = SMS`.
+ *    Verified on macOS 15.5: the older `service` class fails there with
+ *    -10000 (AppleEvent handler failed); `account` works. Leaving the
+ *    account out sends as iMessage instead of SMS.
+ *  - `participant <phone> of s` (verified on macOS 15.5). `buddy` is the
+ *    pre-Big Sur form.
  *  - Messages must be running, so it is launched first.
  * The script is a fixed list of lines. Nothing from a customer or a template
  * is ever added to it.
@@ -41,8 +42,8 @@ export const APPLESCRIPT_LINES = Object.freeze([
   'tell application "Messages" to launch',
   "delay 1",
   'tell application "Messages"',
-  "set s to 1st service whose service type = SMS",
-  "set b to buddy thePhone of s",
+  "set s to 1st account whose service type = SMS",
+  "set b to participant thePhone of s",
   "send theBody to b",
   "end tell",
   "end run",

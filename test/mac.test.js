@@ -77,7 +77,8 @@ test("mac: phone and message go as arguments, never into the script", async () =
   // The script reads its inputs from argv and picks the SMS service.
   const text = APPLESCRIPT_LINES.join("\n");
   assert.match(text, /on run argv/);
-  assert.match(text, /service type = SMS/);
+  assert.match(text, /1st account whose service type = SMS/);
+  assert.match(text, /participant thePhone of s/);
 });
 
 test("mac: refuses to run anywhere but a Mac", () => {
