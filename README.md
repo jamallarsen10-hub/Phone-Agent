@@ -1,5 +1,7 @@
 # Phone Agent
 
+> **AI assistants:** read [AGENTS.md](AGENTS.md) before pushing. Owner's rule: always keep a way back to the old version.
+
 Drafts-first text follow-up for Jamal's Woburn Toyota leads.
 
 It reads your CDK lead export and works out who is due for a text today: a missed appointment, a test drive yesterday, a new lead, or a follow-up date that came up. It writes each message and checks every rule.
