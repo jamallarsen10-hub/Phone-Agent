@@ -77,13 +77,14 @@ test("send window edges", () => {
 
 // ---------- what is due ----------
 
-test("due: missed appointment beats everything, booked leads are left alone", () => {
+test("due: missed appointment beats everything; an upcoming one gets its confirm, not a follow-up", () => {
   const s = store();
   const today = "2026-10-21";
   assert.equal(dueFor(s, lead({ appointmentDate: "2026-10-20", showed: false, followUpDate: "2026-10-19" }), today).template, "missed-appointment");
   assert.equal(dueFor(s, lead({ appointmentDate: "2026-10-20", stage: "No Show" }), today).template, "missed-appointment");
-  assert.equal(dueFor(s, lead({ appointmentDate: "2026-10-23", followUpDate: "2026-10-20" }), today), null);
-  assert.equal(dueFor(s, lead({ appointmentDate: "2026-10-21", followUpDate: "2026-10-20" }), today), null);
+  assert.equal(dueFor(s, lead({ appointmentDate: "2026-10-23", followUpDate: "2026-10-20" }), today).template, "booking-confirm");
+  assert.equal(dueFor(s, lead({ appointmentDate: "2026-10-21", followUpDate: "2026-10-20" }), today).template, "booking-confirm");
+  assert.equal(dueFor(s, lead({ appointmentDate: "2026-10-23", touches: ["confirm"], followUpDate: "2026-10-20" }), today), null, "confirmed and not tomorrow: leave alone");
   assert.equal(dueFor(s, lead({ stage: "Sold", followUpDate: "2026-10-20" }), today), null);
   assert.equal(dueFor(s, lead({ followUpDate: "2026-10-22" }), today), null);
   assert.equal(dueFor(s, lead({ testDriveDate: "2026-10-20" }), today).template, "after-test-drive");

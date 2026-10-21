@@ -44,7 +44,7 @@ test("buying signals are hot handoffs with reasons", () => {
   assert.equal(classifyInbound("thanks!").priority, "normal");
 });
 
-const vars = { firstName: "Maria", vehicle: "RAV4 Hybrid", senderName: "Jamal", dealership: "Woburn Toyota", bookingUrl: "https://jamal-schedule-woburn-toyota.netlify.app" };
+const vars = { firstName: "Maria", vehicle: "RAV4 Hybrid", senderName: "Jamal", dealership: "Woburn Toyota", bookingUrl: "https://jamal-schedule-woburn-toyota.netlify.app", when: "Thu, Oct 23 at 3:00 PM", time: "3:00 PM", reviewUrl: "https://g.page/r/example/review" };
 
 test("templates: every outreach text names Jamal + dealership, ends with opt-out", () => {
   assert.equal(validateTemplates(), true);

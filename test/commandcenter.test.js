@@ -30,7 +30,7 @@ test("actions: no-show queues the reschedule text; a tap beats a stale export", 
   const s = store();
   importLeads(s, "Name,Phone,Appt Date,Showed,OK to Text\nAna Diaz,617-555-0109,10/21/2026,,Y\n", ctx);
   const ana = Object.values(s.leads)[0];
-  assert.equal(buildDrafts(s, ctx).drafts.length, 0, "booked today: leave alone");
+  assert.equal(buildDrafts(s, ctx).drafts[0].template, "booking-confirm", "booked today: confirm it");
   assert.match(runAction("noshow", { leadId: ana.id }, s, ctx).label, /reschedule text queued/);
   assert.equal(buildDrafts(s, ctx).drafts[0].template, "missed-appointment");
   importLeads(s, "Name,Phone,Appt Date,Showed\nAna Diaz,617-555-0109,10/21/2026,Y\n", ctx);

@@ -2,6 +2,7 @@ import { prettyPhone } from "./phone.js";
 import { TEMPLATES } from "./templates.js";
 import { openHandoffs } from "./store.js";
 import { localDate, daysBetween } from "./dates.js";
+import { upcomingAppointments } from "./drafts.js";
 
 /**
  * The Command Center page, in the booking site's look: night sky, aurora
@@ -31,7 +32,25 @@ const HELD = {
   PRICE_BLOCK: "price words in the CRM data; write this one yourself",
   RENDER_FAILED: "message could not be built",
   KILL_SWITCH: "kill switch is on",
+  NO_REVIEW_LINK: "add your review link (reviewUrl) to data/config.json",
 };
+
+const STATUS = {
+  unconfirmed: ["Needs confirm", "hot"],
+  waiting: ["Confirm sent", ""],
+  confirmed: ["Confirmed", "ok"],
+  mark: ["How did it go?", "urgent"],
+  showed: ["Showed", "ok"],
+  "no-show": ["No-show", "urgent"],
+};
+
+function ago(iso, now) {
+  const min = Math.round((now - Date.parse(iso)) / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  return h < 24 ? `${h} hr ago` : `${Math.round(h / 24)} days ago`;
+}
 
 function nameFor(store, lead, phone) {
   if (lead && lead.name) return lead.name;
@@ -62,8 +81,14 @@ function leadChips(lead, today) {
 }
 
 export function renderPage(store, result, { now, config, live = null }) {
-  const { drafts, callList, skipped } = result;
+  const { callList, skipped } = result;
   const today = localDate(now, config.timeZone);
+  const apptDrafts = new Map(result.drafts.filter((d) => d.kind === "appointment").map((d) => [d.leadId, d]));
+  const drafts = result.drafts.filter((d) => d.kind !== "appointment");
+  const appts = upcomingAppointments(store, { now, config });
+  const queue = (store.notionQueue || []);
+  const stuck = queue.filter((q) => q.failed || q.attempts >= 2);
+  const sync = store.notionSync;
   const handoffs = openHandoffs(store).sort(
     (a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || (a.at < b.at ? 1 : -1)
   );
@@ -73,8 +98,10 @@ export function renderPage(store, result, { now, config, live = null }) {
     return `${((h + 11) % 12) + 1}${m ? ":" + String(m).padStart(2, "0") : ""} ${h < 12 ? "AM" : "PM"}`;
   };
   const hot = handoffs.filter((h) => h.priority !== "normal").length;
+  const needConfirm = appts.filter((a) => a.status === "unconfirmed").length;
   const headline =
     handoffs.length ? `${handoffs.length} ${handoffs.length === 1 ? "person is" : "people are"} waiting on you.`
+    : needConfirm ? `${needConfirm} ${needConfirm === 1 ? "booking needs" : "bookings need"} a confirm.`
     : drafts.length ? `${drafts.length} ${drafts.length === 1 ? "text" : "texts"} ready to send.`
     : "All clear.";
 
@@ -115,6 +142,45 @@ export function renderPage(store, result, { now, config, live = null }) {
       ${live ? `<div class="chips">${act("Skip", "skip", { id: d.id })}${leadChips(d.lead, today)}</div>` : ""}
     </article>`;
   }).join("");
+
+  const apptCards = appts.map((a) => {
+    const l = a.lead;
+    const d = apptDrafts.get(l.id);
+    const [label, tone] = STATUS[a.status];
+    const canMark = a.status === "mark" || (a.since === 0 && !["showed", "no-show"].includes(a.status));
+    return `
+    <article class="card appt ${a.status === "mark" ? "urgent" : a.status === "unconfirmed" ? "hot" : ""}">
+      <div class="when"><b>${esc(a.time || "Any time")}</b><span>${esc(a.day)}</span></div>
+      <div class="row"><h3>${esc(l.name || prettyPhone(l.phone))}</h3><span class="tag ${tone}">${esc(label)}</span></div>
+      <div class="meta">${esc([l.vehicle, l.stage].filter(Boolean).join(" · "))}</div>
+      ${d ? `<p class="bubble">${esc(d.body)}</p>
+      <div class="meta small">${esc(TEMPLATES[d.template].label)} · ${d.segments} text${d.segments === 1 ? "" : "s"}</div>
+      <div class="actions">
+        <a class="btn" href="${esc(smsHref(d.phone, d.body))}">Open in Messages</a>
+        <button class="btn ghost" type="button" data-copy="${esc(d.body)}">Copy</button>
+        ${live ? act("Sent ✓", "sent", { id: d.id }, { cls: "btn ok" }) : `<label class="check"><input type="checkbox" data-sent="${esc(d.id)}"> Sent</label>`}
+      </div>` : l.phone ? `<div class="actions"><a class="btn ghost" href="${esc(telHref(l.phone))}">Call ${esc(prettyPhone(l.phone))}</a></div>` : ""}
+      ${live ? `<div class="chips">${canMark ? act("Showed", "showed", { leadId: l.id }) + act("No-show", "noshow", { leadId: l.id }) : ""}${
+        act("Sold", "sold", { leadId: l.id }, { confirm: `Mark ${l.name || "this lead"} sold?` })}${act("Lost", "lost", { leadId: l.id }, { confirm: `Mark ${l.name || "this lead"} lost?` })}</div>` : ""}
+    </article>`;
+  }).join("");
+
+  const syncLine = !config.notionToken ? ""
+    : sync && sync.error ? `<div class="banner">Notion: ${esc(sync.error)}. Showing your last copy${sync.at ? ` from ${esc(ago(sync.at, now))}` : ""}.</div>`
+    : sync && sync.at ? `<div class="window">Notion synced ${esc(ago(sync.at, now))}${queue.length ? ` · ${queue.length} update${queue.length === 1 ? "" : "s"} saving` : ""}.</div>`
+    : `<div class="window">Notion: not synced yet.</div>`;
+  const stuckLine = stuck.length
+    ? `<div class="banner">${stuck.length} change${stuck.length === 1 ? "" : "s"} haven't reached Notion: ${esc(stuck[0].lastError || "retrying")}</div>` : "";
+
+  const replyBox = live ? `
+  <h2>Log a text you got</h2>
+  <form class="card replybox" id="replyForm">
+    <label for="replyPhone">Their number</label>
+    <input id="replyPhone" name="replyPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="(617) 555-0123" required>
+    <label for="replyText">What they said</label>
+    <textarea id="replyText" name="replyText" rows="2" placeholder="YES / STOP / what's my payment?" required></textarea>
+    <div class="actions"><button class="btn" type="submit">Log it</button><span class="meta small">STOP is saved first. YES confirms their appointment.</span></div>
+  </form>` : "";
 
   const callCards = callList.map((c) => `
     <article class="card slim">
@@ -180,9 +246,18 @@ export function renderPage(store, result, { now, config, live = null }) {
   .eyebrow{font:800 13px/1 var(--display);letter-spacing:.24em;text-transform:uppercase;color:var(--gold)}
   h1{font:800 40px/1 var(--display);text-transform:uppercase;letter-spacing:.03em;margin:10px 0 6px;color:var(--cream)}
   .lede{font:italic 500 22px/1.25 var(--serif);color:var(--gold);margin:0 0 18px;text-shadow:0 0 22px rgba(255,192,77,.35)}
-  .stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 6px}
+  .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0 0 6px}
   .stat{background:var(--glass);border:1px solid var(--edge);border-radius:14px;padding:10px 12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
   .stat b{display:block;font:800 30px/1 var(--display);color:var(--ink)}
+  .stat{min-width:0} .stat span{white-space:nowrap}
+  .when{display:flex;align-items:baseline;gap:10px;margin:0 0 6px}
+  .when b{font:800 30px/1 var(--display);color:var(--cream);letter-spacing:.02em}
+  .when span{font:700 13px/1 var(--display);letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}
+  .tag.ok{color:var(--ok);border-color:rgba(60,255,170,.6)}
+  .replybox label{display:block;font-size:14px;color:var(--muted);margin:10px 0 6px}
+  .replybox label:first-child{margin-top:0}
+  .replybox input,.replybox textarea{width:100%;background:var(--field);border:1px solid var(--edge-2);border-radius:12px;color:var(--ink);font:16px var(--ui);padding:12px 14px}
+  .replybox textarea{resize:vertical}
   .stat span{font-size:13px;color:var(--muted)}
   .stat.hot b{color:var(--gold)}
   .window{font-size:13px;color:var(--dim);margin:8px 0 0}
@@ -237,14 +312,19 @@ export function renderPage(store, result, { now, config, live = null }) {
   <p class="lede">${esc(headline)}</p>
   <div class="stats">
     <div class="stat${hot ? " hot" : ""}"><b>${handoffs.length}</b><span>replies</span></div>
+    <div class="stat${needConfirm ? " hot" : ""}"><b>${appts.length}</b><span>coming in</span></div>
     <div class="stat"><b>${drafts.length}</b><span>to text</span></div>
     <div class="stat"><b>${callList.length}</b><span>to call</span></div>
   </div>
   <div class="window">Texts go out ${esc(fmt12(config.sendStart))} to ${esc(fmt12(config.sendEnd))}. Private to this device.</div>
+  ${syncLine}${stuckLine}
   ${config.killSwitch ? `<div class="banner">Kill switch is on. Nothing should be sent.</div>` : ""}
 
   <h2>Waiting on you <span class="n">${handoffs.length}</span></h2>
   ${handoffCards || `<div class="empty">No replies waiting.</div>`}
+
+  <h2>Coming in <span class="n">${appts.length}</span></h2>
+  ${apptCards || `<div class="empty">No appointments in the next week.</div>`}
 
   <h2>Text these <span class="n">${drafts.length}</span></h2>
   ${draftCards || `<div class="empty">Nobody is due for a text today.</div>`}
@@ -254,6 +334,7 @@ export function renderPage(store, result, { now, config, live = null }) {
   ${callCards && !live ? `<p class="meta small">Due today, but no permission to text on file. Ask on the call, then: <code>consent PHONE --source "asked on call"</code></p>` : ""}
 
   ${skippedRows ? `<h2>Held back <span class="n">${skipped.length}</span></h2><ul>${skippedRows}</ul>` : ""}
+  ${replyBox}
 </main>
 ${dock}
 <div class="toast" id="toast" role="status"></div>
@@ -287,6 +368,16 @@ ${dock}
         b.disabled = false; toast("Didn't save: " + (x.j.detail || x.j.reason || x.r.status));
       })
       .catch(function () { b.disabled = false; toast("Can't reach the Command Center. Is it still running?"); });
+  });
+  var rf = document.getElementById("replyForm");
+  if (rf && KEY) rf.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = rf.querySelector("button[type=submit]"); btn.disabled = true;
+    fetch("/api/action", { method: "POST", headers: { "content-type": "application/json", "x-pa-key": KEY },
+      body: JSON.stringify({ action: "reply", args: { phone: document.getElementById("replyPhone").value, text: document.getElementById("replyText").value } }) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { r: r, j: j }; }); })
+      .then(function (x) { if (x.r.ok && x.j.ok) return location.reload(); btn.disabled = false; toast("Didn't save: " + (x.j.detail || x.j.reason || x.r.status)); })
+      .catch(function () { btn.disabled = false; toast("Can't reach the Command Center. Is it still running?"); });
   });
   var cmd = document.getElementById("cmd");
   if (cmd) {

@@ -21,6 +21,8 @@ export const EMPTY = () => ({
   outbound: [],
   inbound: {},
   handoffs: [],
+  notionQueue: [],
+  notionSync: null,
 });
 
 export function storePath(dataDir) {

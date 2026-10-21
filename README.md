@@ -22,13 +22,22 @@ Zero dependencies. Plain Node 18+. Nothing hosted, no accounts, $0.
    - Mac: nodejs.org
    - Tablet (Termux): `pkg install nodejs`
 2. Get this folder onto the machine (`git clone` or download the zip).
-3. Export your leads from CDK to CSV and run:
+3. **Connect your Notion Lead Pipeline (recommended).** This takes about 5 minutes.
+   1. Go to notion.so/my-integrations and create a new integration named `Phone Agent`.
+      - Type: Internal.
+      - Capabilities: **Read content** and **Update content**.
+      - This is a second integration. The booking page's `Lead Capture` key can only add pages, so it can't be used here.
+   2. Copy its secret (starts with `ntn_`).
+   3. In Notion, open **🚗 Lead Pipeline — Woburn Toyota** → `···` → **Connections** → add `Phone Agent`.
+   4. Create `data/config.json` with your secret:
 
-   ```
-   node src/cli.js import ~/Downloads/leads.csv
-   ```
+      ```json
+      { "notionToken": "ntn_your_secret_here" }
+      ```
 
-   It prints which columns it matched and warns about anything missing.
+   5. Run `node src/cli.js sync`. It should say how many leads it pulled.
+
+   No Notion? Export leads from CDK to CSV and run `node src/cli.js import leads.csv` instead.
 
 ## Daily routine (about 5 minutes)
 
@@ -61,6 +70,32 @@ Only you. The Command Center runs on your own device, and nothing is uploaded or
 
 No server? `node src/cli.js drafts` writes the same page to `out/today.html`. There you tick Sent and copy the one command it builds (`node src/cli.js sent <ids>`).
 
+## How it follows your Notion sequence
+
+It drafts the same touches you track in **Touches Sent**. When you tap **Sent**, it writes the touch back to Notion along with **Last Contact**.
+
+| Touch | When it's due |
+|---|---|
+| `confirm` | Any upcoming appointment that hasn't been confirmed. Sending it moves **New Request** to **Accepted**. |
+| `reminder-night` | The day before. Skipped if the confirm went out that same day. |
+| `reminder-2h` | Within 3 hours of the appointment time. |
+| `noshow-3h` | 3 hours after a **No Show** (tap No-show, or set the stage in Notion). |
+| `nosale-1d` / `3d` / `7d` / `30d` | Days after a **Showed** visit. A missed step is skipped, never stacked. |
+| `sold-review`, `sold-6mo` | After you mark **Sold** here. Old sales aren't guessed at. The review text waits until `reviewUrl` is in `data/config.json`. |
+| `cdk-intro` → `cdk-bump` → `cdk-last` | For **CDK Lead** stage. The bump comes 3 days after the last text, the final one 4 days after that. |
+| Follow-Up date | When it arrives, unless Last Contact is already on or after it. Sending it moves Follow-Up 7 days ahead. |
+
+Taps on Sold, Lost, Showed and No-show set **Stage** in Notion. Opt-outs and permission you record here are added as one line in **Notes**, so Notion keeps the record.
+
+Each change waits 75 seconds before it's sent, longer than the 60-second Undo, so an undone tap never reaches Notion. If Notion is unreachable, changes stay queued and the page says so.
+
+**Who can be texted.** The booking page tells every customer "By sending, you're OK with me texting you about this visit." That covers the confirm, both reminders, the no-show text and the day-after text. Everything else needs one of these:
+- the "Also OK to text me after my visit" box ticked on the booking page
+- `OK to text follow-ups` in the lead's Notes
+- an **OK to text** tap after they agree on a call
+
+Walk-ins and CDK leads with none of these land on **Call instead**. This is a design choice, not legal advice; adjust it with your dealership if needed.
+
 ## Rules it enforces
 
 Every text passes through one gate (`src/guardrails.js`). Nothing else decides whether a number gets texted.
@@ -71,7 +106,7 @@ Every text passes through one gate (`src/guardrails.js`). Nothing else decides w
   - Anything ambiguous goes to you marked urgent.
   - START never resumes texting on its own; you confirm by hand.
   - Each opt-out gets exactly one confirmation text.
-- **One text per number per day**, counted in Woburn time. A routine follow-up waits 2 days after any earlier text.
+- **One follow-up text per number per day**, counted in Woburn time. Appointment texts (confirm, reminders) get their own cap of 2, so a same-day booking can be confirmed and reminded. A routine follow-up waits 2 days after any earlier text.
 - **Quiet hours**: send window is Mon–Sat, 9 AM to 8 PM. This is a guess; confirm it and change it in `data/config.json`.
 - **No prices in any text.** No template has a price slot. A denylist also blocks `$`, payments, APR, discounts, trade values, and "approved". If a CRM field contains price words, that draft is held and you write it yourself.
 - **Every text says it's Jamal at Woburn Toyota** and ends with "Reply STOP to opt out."
@@ -105,7 +140,8 @@ PHONE_AGENT_DATA=/tmp/pa/data PHONE_AGENT_OUT=/tmp/pa/out node src/cli.js drafts
 ## All commands
 
 ```
-serve [--lan] [--port N]    the Command Center (one-tap)
+serve [--lan] [--port N]    the Command Center (one-tap; pulls Notion when opened)
+sync                        pull Notion now and save any waiting taps
 drafts                      build today's page as a file, plus a CSV
 sent <id> [id...]           log texts you sent
 sold <phone> / lost <phone> stop follow-ups for a lead
@@ -130,6 +166,7 @@ src/drafts.js       who is due today, one per number, idempotent
 src/inbound.js      handles replies: dedup, STOP first, handoff to you
 src/send.js         log a manual send, or the automatic path
 src/leads.js        CSV import and merge
+src/notion.js       Notion pull, write-back queue, and the 75-second grace period
 src/page.js         the Command Center page (booking-site look)
 src/server.js       private local server for one-tap actions
 src/actions.js      every tap: sent, skip, handled, sold, lost, showed, no-show, consent, opt out
@@ -143,7 +180,7 @@ Customer data never goes in git: `data/`, `out/` and every `*.csv` except the ex
 
 ## Not built yet (decisions only you can make)
 
-1. **Consent at the source.** The booking page does not ask permission to text, so new bookings arrive with no consent and land on *Call instead*. Adding one checkbox to the booking form is the biggest unlock. It touches the live booking site, so it waits for your OK.
+1. **Merge the booking-page branch.** `jamal-booking-site` branch `claude/booking-text-loop` records texting permission with every booking and adds the optional follow-ups checkbox. It changes the live site, so it waits for your review.
 2. **Dealership policy.** Confirm Woburn Toyota is fine with you texting customers from a system like this, and whether the sender is you or the dealership.
 3. **Provider and 10DLC.** Automatic sending needs one provider (Twilio or Telnyx) plus US carrier registration (brand + campaign). Check current fees and timelines on the provider's own pages. Until then, `mode` stays `"drafts"`.
 4. **Sending hours.** Confirm the 9 AM–8 PM, Mon–Sat window.
@@ -156,10 +193,11 @@ None of this is legal advice. Confirm texting rules with the dealership before t
 npm test
 ```
 
-50 tests. They cover:
+56 tests. They cover:
 - STOP edge cases, START/HELP, and buying signals
 - price blocking and template rules
 - quiet hours across DST, the daily limit at midnight, and shared phone numbers
 - duplicate webhooks, and provider timeouts never double-texting
 - a full CLI day on the sample export
 - the Command Center's lock (no key, wrong host, or a cross-site tap are all refused), and undo
+- a booking run end to end against a fake Notion: confirm → Sent → write-back (merging touches, keeping links in Notes) → reminders → STOP, plus Undo never reaching Notion

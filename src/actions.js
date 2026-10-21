@@ -2,6 +2,10 @@ import { markSent, skipDraft } from "./send.js";
 import { clearHandoffs } from "./inbound.js";
 import { leadsByPhone } from "./store.js";
 import { toE164, prettyPhone } from "./phone.js";
+import { handleInbound } from "./inbound.js";
+import { queueChange, changesForSent } from "./notion.js";
+import { TOUCH_OF } from "./templates.js";
+import { localDate } from "./dates.js";
 
 /**
  * Every one-tap action in the Command Center, shared by the CLI and the
@@ -12,9 +16,18 @@ import { toE164, prettyPhone } from "./phone.js";
  * import never touches, so a stale export can't undo a tap.
  */
 export const ACTIONS = {
-  sent: ({ id }, store, { now }) => {
+  sent: ({ id }, store, { now, config }) => {
     const r = markSent(store, id, { now });
-    return r.ok ? { ok: true, label: `Logged text to ${who(store, r.message)}` } : r;
+    if (!r.ok) return r;
+    const m = r.message;
+    const lead = m.leadId && store.leads[m.leadId];
+    if (lead) {
+      const today = localDate(now, config.timeZone);
+      const change = changesForSent(lead, m.template, TOUCH_OF[m.template], { today, config });
+      lead.lastContact = today;
+      if (!queueChange(store, lead, change, { now }) && change.followUp) lead.followUpDate = change.followUp;
+    }
+    return { ok: true, label: `Logged text to ${who(store, m)}` };
   },
 
   skip: ({ id, why = "" }, store, { now }) => {
@@ -28,8 +41,10 @@ export const ACTIONS = {
     return n ? { ok: true, label: `Cleared reply from ${prettyPhone(p)}` } : { ok: false, reason: "NOTHING_OPEN" };
   },
 
-  optout: ({ phone, why = "" }, store, { now }) => {
+  optout: ({ phone, why = "" }, store, { now, config }) => {
     const p = mustPhone(phone);
+    const day = localDate(now, config.timeZone);
+    for (const l of leadsByPhone(store, p)) queueChange(store, l, { appendNote: `Texts: do not text (${day}).` }, { now });
     if (!store.optOuts[p]) store.optOuts[p] = { at: now.toISOString(), via: "manual", text: why };
     for (const m of store.outbound) {
       if (m.phone === p && m.status === "draft") {
@@ -41,17 +56,20 @@ export const ACTIONS = {
     return { ok: true, label: `${prettyPhone(p)} will never be texted again` };
   },
 
-  consent: ({ phone, source }, store, { now }) => {
+  consent: ({ phone, source }, store, { now, config }) => {
     const p = mustPhone(phone);
     const src = String(source || "").trim();
     if (!src) return { ok: false, reason: "NEED_SOURCE", detail: "say how they agreed" };
     if (store.optOuts[p]) return { ok: false, reason: "OPTED_OUT", detail: "they sent STOP; only they can opt back in" };
     const leads = leadsByPhone(store, p);
     if (!leads.length) return { ok: false, reason: "NO_LEAD" };
+    const day = localDate(now, config.timeZone);
     for (const l of leads) {
       l.consent = true;
       l.consentSource = src;
       l.consentAt = now.toISOString();
+      l.consentTap = { source: src, at: now.toISOString() };
+      queueChange(store, l, { appendNote: `OK to text follow-ups: ${src.slice(0, 80)} (${day})` }, { now });
     }
     return { ok: true, label: `OK to text ${names(leads)}` };
   },
@@ -59,10 +77,15 @@ export const ACTIONS = {
   sold: (args, store, ctx) => outcome(args, store, ctx, "Sold"),
   lost: (args, store, ctx) => outcome(args, store, ctx, "Lost"),
 
-  reopen: ({ leadId }, store) => {
+  reopen: ({ leadId }, store, { now }) => {
     const l = store.leads[leadId];
     if (!l) return { ok: false, reason: "NO_LEAD" };
+    const back = l.closed && l.closed.prevStage;
     delete l.closed;
+    if (back) {
+      l.stage = back;
+      queueChange(store, l, { stage: back }, { now });
+    }
     return { ok: true, label: `${l.name || "Lead"} is back in follow-ups` };
   },
 
@@ -71,6 +94,7 @@ export const ACTIONS = {
     if (!l) return { ok: false, reason: "NO_LEAD" };
     l.showed = true;
     l.showedMarkedAt = now.toISOString();
+    queueChange(store, l, { stage: "Showed" }, { now });
     return { ok: true, label: `${l.name || "Lead"} showed` };
   },
 
@@ -81,8 +105,23 @@ export const ACTIONS = {
     if (!l.appointmentDate) return { ok: false, reason: "NO_APPOINTMENT" };
     l.showed = false;
     l.showedMarkedAt = now.toISOString();
+    queueChange(store, l, { stage: "No Show" }, { now });
     return { ok: true, label: `${l.name || "Lead"} no-show; reschedule text queued` };
   },
+};
+
+// Log a text a customer sent (from the Command Center's reply box).
+ACTIONS.reply = ({ phone, text }, store, { now, config }) => {
+  const body = String(text || "").trim();
+  if (!body) return { ok: false, reason: "EMPTY", detail: "type what they said" };
+  const r = handleInbound(store, { from: mustPhone(phone), body }, { now, config });
+  if (r.duplicate) return { ok: false, reason: "ALREADY_LOGGED" };
+  const c = r.classification;
+  const who = r.leads.map((l) => l.name).filter(Boolean).join(" / ") || prettyPhone(r.phone);
+  if (c.type === "OPT_OUT") return { ok: true, label: `${who} opted out; send the confirmation once` };
+  if (r.confirmed) return { ok: true, label: `${who} confirmed` };
+  if (c.type === "HELP") return { ok: true, label: `HELP reply ready for ${who}` };
+  return { ok: true, label: `${who}: ${c.priority === "hot" ? "buying signal" : c.priority === "urgent" ? "read first" : "reply"} logged` };
 };
 
 export function runAction(name, args, store, ctx) {
@@ -98,7 +137,11 @@ export function runAction(name, args, store, ctx) {
 function outcome({ leadId }, store, { now }, stage) {
   const l = store.leads[leadId];
   if (!l) return { ok: false, reason: "NO_LEAD" };
-  l.closed = { stage, at: now.toISOString() };
+  const prevStage = l.stage;
+  if (stage === "Sold") l.soldAt = now.toISOString();
+  queueChange(store, l, { stage }, { now });
+  l.stage = stage;
+  l.closed = { stage, at: now.toISOString(), prevStage };
   for (const m of store.outbound) {
     if (m.leadId === l.id && m.status === "draft") {
       m.status = "expired";

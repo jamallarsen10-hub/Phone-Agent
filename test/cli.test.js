@@ -23,7 +23,7 @@ test("cli: full day on the sample export", () => {
     assert.match(run(dir, "import", SAMPLE, ...NOW), /10 rows: 10 new/);
 
     const out = run(dir, "drafts", ...NOW);
-    assert.match(out, /2026-10-21: 5 to text, 0 replies waiting, 1 to call/);
+    assert.match(out, /2026-10-21: 6 to text, 0 replies waiting, 1 to call/);
     const page = readFileSync(join(dir, "out", "today.html"), "utf8");
     for (const name of ["Ashley Brooks", "Kevin Patel", "Derek Chen", "Maria Gonzalez"]) assert.ok(page.includes(name), name);
     assert.ok(!page.includes("Sam Ortiz"), "sold lead is not texted");
@@ -31,14 +31,15 @@ test("cli: full day on the sample export", () => {
     assert.ok(existsSync(join(dir, "out", "drafts-2026-10-21.csv")));
 
     const ids = [...out.matchAll(/\[([0-9a-f]{6,})\]/g)].map((m) => m[1]);
-    assert.equal(ids.length, 5);
+    assert.equal(ids.length, 6);
+    assert.ok(out.includes("Nina Walsh — appointment 2026-10-23"), "booked lead gets her confirm");
     assert.match(run(dir, "sent", ids[0], ids[1], ...NOW), /Logged 2 sent/);
-    assert.match(run(dir, "drafts", ...NOW), /3 to text/);
+    assert.match(run(dir, "drafts", ...NOW), /4 to text/);
 
     assert.match(run(dir, "reply", "617-555-0101", "how much would my payment be?", ...NOW), /HOT — .*payment/);
     assert.match(run(dir, "reply", "781-555-0102", "STOP", ...NOW), /opted out/);
     const after = run(dir, "drafts", ...NOW);
-    assert.match(after, /2 to text, 1 reply waiting/);
+    assert.match(after, /3 to text, 1 reply waiting/);
     assert.ok(!/Derek Chen — new lead/.test(after), "opted-out lead dropped from the list");
     assert.match(after, /they texted STOP/, "one opt-out confirmation drafted");
 

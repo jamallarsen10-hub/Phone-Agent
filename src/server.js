@@ -5,6 +5,10 @@ import { loadStore, saveStore } from "./store.js";
 import { buildDrafts } from "./drafts.js";
 import { renderPage } from "./page.js";
 import { runAction } from "./actions.js";
+import { notionClient, syncNotion, flushQueue, GRACE_MS } from "./notion.js";
+
+const UNDO_MS = 60 * 1000; // shorter than Notion's grace period, so Undo always wins
+const STALE_MS = 2 * 60 * 1000;
 
 /**
  * The Command Center: a private page served from Jamal's own device.
@@ -22,10 +26,33 @@ import { runAction } from "./actions.js";
  *
  * Undo keeps one snapshot: the store as it was before the last tap.
  */
-export function startServer({ dataDir, config, port = 4777, lan = false, nowFn = () => new Date(), log = console.log }) {
+export function startServer({ dataDir, config, port = 4777, lan = false, nowFn = () => new Date(), log = console.log, notion = null, fetchImpl }) {
   const key = randomBytes(18).toString("base64url");
   const host = lan ? "0.0.0.0" : "127.0.0.1";
   let undo = null; // { snapshot, label, at }
+
+  // Notion: pull when the page is opened and the copy is stale; push queued
+  // taps in the background once their grace period has passed.
+  const client = notion || (config.notionToken ? notionClient({ token: config.notionToken, fetchImpl }) : null);
+  let syncing = null;
+  const syncIfStale = async (now, force = false) => {
+    if (!client) return;
+    const last = loadStore(dataDir).notionSync;
+    const stale = force || !last || !last.at || now - Date.parse(last.at) > STALE_MS || last.error;
+    if (!stale) return;
+    syncing = syncing || syncNotion(dataDir, config, client, { now, graceMs: GRACE_MS }).finally(() => (syncing = null));
+    let timer;
+    const slow = new Promise((res) => (timer = setTimeout(() => res({ ok: false, slow: true }), 8000)));
+    const r = await Promise.race([syncing, slow]);
+    clearTimeout(timer);
+    if (r && r.ok === false && !r.slow) log(`[command center] Notion sync failed: ${r.error}`);
+  };
+  const flushTimer = client
+    ? setInterval(() => {
+        flushQueue(dataDir, config, client, { now: nowFn() }).catch((e) => log(`[command center] Notion save failed: ${e.message}`));
+      }, 30 * 1000)
+    : null;
+  if (flushTimer && flushTimer.unref) flushTimer.unref();
 
   const allowedHosts = () => {
     const names = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -74,10 +101,11 @@ export function startServer({ dataDir, config, port = 4777, lan = false, nowFn =
 
       if (req.method === "GET" && url.pathname === "/") {
         const now = nowFn();
+        await syncIfStale(now, url.searchParams.has("refresh"));
         const store = loadStore(dataDir);
         const result = buildDrafts(store, { now, config });
         saveStore(dataDir, store);
-        const fresh = undo && now - undo.at < 10 * 60 * 1000 ? undo : null;
+        const fresh = undo && now - undo.at < UNDO_MS ? undo : null;
         const html = renderPage(store, result, { now, config, live: { key, undoLabel: fresh && fresh.label } });
         return send(res, 200, html, "text/html; charset=utf-8");
       }
@@ -89,7 +117,7 @@ export function startServer({ dataDir, config, port = 4777, lan = false, nowFn =
         const store = loadStore(dataDir);
 
         if (body.action === "undo") {
-          if (!undo) return sendJSON(res, 409, { ok: false, reason: "NOTHING_TO_UNDO" });
+          if (!undo || now - undo.at >= UNDO_MS) return sendJSON(res, 409, { ok: false, reason: "NOTHING_TO_UNDO", detail: "too late to undo" });
           saveStore(dataDir, JSON.parse(undo.snapshot));
           const label = `Undid: ${undo.label}`;
           undo = null;
@@ -116,6 +144,7 @@ export function startServer({ dataDir, config, port = 4777, lan = false, nowFn =
     send(res, status, JSON.stringify(obj), "application/json");
   }
 
+  server.on("close", () => flushTimer && clearInterval(flushTimer));
   return new Promise((resolve) => {
     server.listen(port, host, () => {
       const actual = server.address().port;

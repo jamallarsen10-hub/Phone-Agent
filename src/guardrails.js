@@ -53,12 +53,20 @@ export function canSend(store, { lead, phone, template }, { now, config, checkHo
     return repliedToday ? no("ALREADY_DONE", "already answered HELP today") : yes();
   }
 
-  // Outreach from here on.
-  if (!lead || lead.consent !== true) return no("NO_CONSENT", "no permission to text on file");
+  // Outreach and appointment texts from here on.
+  // "visit" texts (confirm, reminders, no-show, day-after) are covered by the
+  // booking page's notice; everything else needs full permission on file.
+  const permitted = lead && (lead.consent === true || (t.scope === "visit" && lead.visitConsent === true));
+  if (!permitted)
+    return no("NO_CONSENT", lead && lead.visitConsent && t.scope !== "visit" ? "only OK'd texts about the visit" : "no permission to text on file");
   if (openHandoffs(store, number).length) return no("AWAITING_JAMAL", "they replied; Jamal answers first");
-  if (sentToday.length >= config.maxPerPhonePerDay) return no("DAILY_LIMIT", "already texted today");
+  const kindOf = (m) => TEMPLATES[m.template]?.kind || "outreach";
+  const sameKindToday = sentToday.filter((m) => kindOf(m) === t.kind).length;
+  const cap = t.kind === "appointment" ? config.appointmentMaxPerDay : config.maxPerPhonePerDay;
+  if (sameKindToday >= cap) return no("DAILY_LIMIT", "already texted today");
 
   if (template === "lead-followup" && sent.length) {
+    // Routine follow-ups wait out the gap after any text.
     const last = sent.map((m) => localDate(new Date(m.sentAt), config.timeZone)).sort().pop();
     if (daysBetween(last, today) < config.minDaysBetweenFollowups)
       return no("TOO_SOON", `last text ${last}`);

@@ -11,6 +11,7 @@ import { handleInbound } from "./inbound.js";
 import { markSent, skipDraft, sendDraft, dryRunProvider } from "./send.js";
 import { runAction } from "./actions.js";
 import { startServer } from "./server.js";
+import { notionClient, syncNotion } from "./notion.js";
 import { toE164, prettyPhone } from "./phone.js";
 import { toCSV } from "./csv.js";
 
@@ -28,6 +29,7 @@ Daily:
   sold|lost <phone>          Stop follow-ups for a lead
 
 Setup and fixes:
+  sync                       Pull the Notion Lead Pipeline now and save any taps waiting to go out
   import <export.csv>        Load or refresh leads from a CDK export (never deletes)
   consent <phone> --source "how they said yes"   Record permission to text
   optout <phone>             Record a do-not-text you got another way (call, email)
@@ -114,6 +116,15 @@ async function main() {
       if (s.sharedPhone) console.log(`${s.sharedPhone} leads share a number with someone else (one text per number per day).`);
       console.log(`${s.consentYes} leads have permission to text on file.`);
       s.warnings.forEach((w) => console.log("Warning: " + w));
+      return;
+    }
+
+    case "sync": {
+      if (!config.notionToken) fail("No Notion token. Add notionToken to data/config.json or set NOTION_TOKEN. See README.");
+      const r = await syncNotion(DATA, config, notionClient({ token: config.notionToken }), { now, graceMs: 0 });
+      if (!r.ok) fail(r.error);
+      console.log(`Pulled ${r.count} leads from Notion. Saved ${r.pushed} change${r.pushed === 1 ? "" : "s"} back.`);
+      for (const e of r.pushErrors) console.log(`  not saved: ${e.error}`);
       return;
     }
 

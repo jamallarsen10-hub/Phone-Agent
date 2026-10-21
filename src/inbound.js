@@ -4,6 +4,8 @@ import { classifyInbound } from "./keywords.js";
 import { canSend } from "./guardrails.js";
 import { render } from "./templates.js";
 import { leadsByPhone } from "./store.js";
+import { localDate, daysBetween } from "./dates.js";
+import { queueChange } from "./notion.js";
 
 /**
  * Record a text the customer sent. Order matters and follows the design:
@@ -46,7 +48,21 @@ export function handleInbound(store, { messageId, from, body, receivedAt }, { no
       }
     }
     result.replyDraft = addReply(store, phone, leads, "opt-out-confirm", vars, { now, config });
+    // Record it in Notion too, where the booking page and Jamal will see it.
+    const day = localDate(now, config.timeZone);
+    for (const l of leads) queueChange(store, l, { appendNote: `Texts: replied STOP ${day}. Do not text.` }, { now });
     return result;
+  }
+
+  // "YES" to an upcoming appointment just confirms it. Nothing to answer.
+  if (c.type === "CONFIRM") {
+    const today = localDate(now, config.timeZone);
+    const booked = leads.filter((l) => l.appointmentDate && daysBetween(l.appointmentDate, today) <= 0);
+    if (booked.length) {
+      for (const l of booked) l.confirmedAt = at;
+      result.confirmed = booked;
+      return result;
+    }
   }
 
   if (c.type === "HELP") {

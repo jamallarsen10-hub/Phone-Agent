@@ -15,6 +15,19 @@ export const DEFAULTS = Object.freeze({
   maxPerPhonePerDay: 1,
   // A routine follow-up waits this many days after any earlier text to the number.
   minDaysBetweenFollowups: 2,
+  // Appointment texts (confirm, reminders) have their own cap so a same-day
+  // booking can get its confirmation and its 2-hour reminder.
+  appointmentMaxPerDay: 2,
+  // CDK sequence spacing, counted from the last text: intro -> bump -> last.
+  cdkBumpAfterDays: 3,
+  cdkLastAfterDays: 4,
+  // After a routine follow-up goes out, the next Follow-Up date moves this far ahead.
+  followupGapDays: 7,
+  // Your Google review link. The review-request text is held until this is set.
+  reviewUrl: "",
+  // Notion Lead Pipeline. Token comes from NOTION_TOKEN or data/config.json "notionToken".
+  notionDatabaseId: "c710ad513e9743cfb49544b2bc7cc133",
+  notionToken: "",
   senderName: "Jamal",
   dealership: "Woburn Toyota",
   bookingUrl: "https://jamal-schedule-woburn-toyota.netlify.app",
@@ -37,6 +50,8 @@ export function loadConfig(dataDir, env = process.env) {
   // KILL_SWITCH=true in the environment always wins: it can stop sends, never start them.
   if (/^(1|true|yes|on)$/i.test(env.KILL_SWITCH || "")) cfg.killSwitch = true;
   if (env.BOOKING_URL) cfg.bookingUrl = env.BOOKING_URL;
+  if (env.NOTION_TOKEN) cfg.notionToken = env.NOTION_TOKEN;
+  if (env.NOTION_DATABASE_ID) cfg.notionDatabaseId = env.NOTION_DATABASE_ID;
   validateConfig(cfg);
   return cfg;
 }
