@@ -2,11 +2,19 @@
 
 Drafts-first text follow-up for Jamal's Woburn Toyota leads.
 
-It reads your CDK lead export and works out who is due for a text today: a missed appointment, a test drive yesterday, a new lead, or a follow-up date that came up. It writes each message and checks every rule. You get one page on your phone where each card opens Messages with the text already filled in. You send them yourself.
+It reads your CDK lead export and works out who is due for a text today: a missed appointment, a test drive yesterday, a new lead, or a follow-up date that came up. It writes each message and checks every rule.
+
+Everything lands in the **Command Center**, a private page in the same look as your booking site. Each card opens Messages with the text already filled in, and you send it yourself. One tap logs what happened:
+
+- Sent, Skip, Handled
+- Sold, Lost, Showed, No-show
+- OK to text, Opt out
+
+Undo covers the last tap.
 
 Automatic sending uses the same engine and the same gate. It stays off until a texting provider and 10DLC registration are in place (see **Not built yet**).
 
-Zero dependencies. Plain Node 18+. No server, no accounts, $0.
+Zero dependencies. Plain Node 18+. Nothing hosted, no accounts, $0.
 
 ## Setup (once)
 
@@ -26,24 +34,32 @@ Zero dependencies. Plain Node 18+. No server, no accounts, $0.
 
 ```
 node src/cli.js import ~/Downloads/leads.csv   # fresh export, if you have one
-node src/cli.js drafts                          # builds out/today.html
+node src/cli.js serve                           # opens the Command Center
 ```
 
-1. Open `out/today.html` on your phone.
-2. **Replies waiting on you** comes first. Buying signals (price, payment, trade, "call me") are marked; call those first.
-3. **Text these**: tap *Open in Messages*, hit send, tick *Sent*.
-4. The bar at the bottom builds one command. Copy it and run it, so the log knows what went out:
+`serve` prints a private link. Open it in the browser on the same device and leave the window running.
 
-   ```
-   node src/cli.js sent 9eebdf 4fbdb9
-   ```
+1. **Waiting on you** is on top. Buying signals (price, payment, trade, "call me") glow gold, and "read first" items glow red. Call the gold ones first, then tap **Handled**.
+2. **Text these**: tap *Open in Messages*, hit send, come back, tap **Sent**.
+3. **Call instead**: due today but no permission to text. Ask on the call, then tap **OK to text**.
+4. Wrong tap? Hit **Undo** in the bottom bar.
 
 When a customer texts you back, log it. STOP is saved before anything else happens:
 
 ```
 node src/cli.js reply 617-555-0101 "how much would my payment be?"
-node src/cli.js handled 617-555-0101      # after you've answered them
 ```
+
+### Who can see it
+
+Only you. The Command Center runs on your own device, and nothing is uploaded or published.
+- It only answers on this device (`127.0.0.1`), and only to the private link printed at start, which turns into a cookie.
+- Other websites can't press its buttons.
+- The page never caches or leaks the link.
+
+`serve --lan` lets your phone open it while it runs on your Mac or tablet on the same Wi-Fi. That still needs the private link.
+
+No server? `node src/cli.js drafts` writes the same page to `out/today.html`. There you tick Sent and copy the one command it builds (`node src/cli.js sent <ids>`).
 
 ## Rules it enforces
 
@@ -89,8 +105,10 @@ PHONE_AGENT_DATA=/tmp/pa/data PHONE_AGENT_OUT=/tmp/pa/out node src/cli.js drafts
 ## All commands
 
 ```
-drafts                      build today's page and CSV
+serve [--lan] [--port N]    the Command Center (one-tap)
+drafts                      build today's page as a file, plus a CSV
 sent <id> [id...]           log texts you sent
+sold <phone> / lost <phone> stop follow-ups for a lead
 reply <phone> <text>        log a text a customer sent you
 import <file.csv>           load or refresh leads
 consent <phone> --source "how they agreed"
@@ -112,7 +130,9 @@ src/drafts.js       who is due today, one per number, idempotent
 src/inbound.js      handles replies: dedup, STOP first, handoff to you
 src/send.js         log a manual send, or the automatic path
 src/leads.js        CSV import and merge
-src/page.js         the phone page
+src/page.js         the Command Center page (booking-site look)
+src/server.js       private local server for one-tap actions
+src/actions.js      every tap: sent, skip, handled, sold, lost, showed, no-show, consent, opt out
 data/               your leads and log (store.json + one backup). Gitignored.
 out/                today's page and CSV. Gitignored.
 ```
@@ -136,9 +156,10 @@ None of this is legal advice. Confirm texting rules with the dealership before t
 npm test
 ```
 
-45 tests. They cover:
+50 tests. They cover:
 - STOP edge cases, START/HELP, and buying signals
 - price blocking and template rules
 - quiet hours across DST, the daily limit at midnight, and shared phone numbers
 - duplicate webhooks, and provider timeouts never double-texting
 - a full CLI day on the sample export
+- the Command Center's lock (no key, wrong host, or a cross-site tap are all refused), and undo

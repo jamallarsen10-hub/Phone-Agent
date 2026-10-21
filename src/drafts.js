@@ -31,7 +31,7 @@ function sentForLead(store, leadId, template, dueKey) {
  * nothing here invents a follow-up the CRM did not ask for.
  */
 export function dueFor(store, lead, today) {
-  if (isClosedStage(lead.stage)) return null;
+  if (lead.closed || isClosedStage(lead.stage)) return null;
   const d = (a) => (a ? daysBetween(a, today) : null);
 
   const missed = lead.appointmentDate && (lead.showed === false || isNoShowStage(lead.stage));

@@ -7,8 +7,10 @@ import { loadStore, saveStore, leadsByPhone, openHandoffs } from "./store.js";
 import { importLeads } from "./leads.js";
 import { buildDrafts } from "./drafts.js";
 import { renderPage } from "./page.js";
-import { handleInbound, clearHandoffs } from "./inbound.js";
+import { handleInbound } from "./inbound.js";
 import { markSent, skipDraft, sendDraft, dryRunProvider } from "./send.js";
+import { runAction } from "./actions.js";
+import { startServer } from "./server.js";
 import { toE164, prettyPhone } from "./phone.js";
 import { toCSV } from "./csv.js";
 
@@ -19,9 +21,11 @@ const OUT = resolve(process.env.PHONE_AGENT_OUT || join(ROOT, "out"));
 const HELP = `Phone Agent — drafts-first text follow-up
 
 Daily:
-  drafts                     Build today's list -> out/today.html (open it on your phone)
-  sent <id> [id...]          Log texts you sent (the page builds this command for you)
+  serve [--lan]              Open the Command Center: every button saves on tap
   reply <phone> <text>       Log a text a customer sent you (STOP, questions, anything)
+  drafts                     Or: build out/today.html as a file (no server)
+  sent <id> [id...]          Log texts you sent from the file version
+  sold|lost <phone>          Stop follow-ups for a lead
 
 Setup and fixes:
   import <export.csv>        Load or refresh leads from a CDK export (never deletes)
@@ -171,41 +175,44 @@ async function main() {
       return;
     }
 
-    case "optout": {
+    case "optout":
+    case "consent":
+    case "handled":
+    case "sold":
+    case "lost": {
       const phone = needPhone(args[0]);
-      if (!store.optOuts[phone]) {
-        store.optOuts[phone] = { at: now.toISOString(), via: "manual", text: typeof flags.why === "string" ? flags.why : "" };
+      let a = { phone };
+      if (cmd === "optout") a.why = typeof flags.why === "string" ? flags.why : "";
+      if (cmd === "consent") {
+        a.source = typeof flags.source === "string" ? flags.source : "";
+        if (!a.source.trim()) fail('say how they agreed: consent <phone> --source "asked on call 10/20"');
       }
-      for (const m of store.outbound) if (m.phone === phone && m.status === "draft") m.status = "expired";
+      if (cmd === "sold" || cmd === "lost") {
+        const leads = leadsByPhone(store, phone);
+        if (leads.length !== 1) fail(leads.length ? "more than one lead on that number; use the Command Center" : "no lead with that number");
+        a = { leadId: leads[0].id };
+      }
+      const r = runAction(cmd, a, store, { now, config });
+      if (!r.ok) fail(`${r.reason}${r.detail ? " — " + r.detail : ""}`);
       saveStore(DATA, store);
-      console.log(`${prettyPhone(phone)} is opted out. It will not get another text.`);
+      console.log(r.label + ".");
       return;
     }
 
-    case "consent": {
-      const phone = needPhone(args[0]);
-      const source = typeof flags.source === "string" ? flags.source.trim() : "";
-      if (!source) fail('say how they agreed: consent <phone> --source "asked on call 10/20"');
-      if (store.optOuts[phone])
-        fail(`${prettyPhone(phone)} sent STOP. Only the customer can opt back in, by texting START; confirm with them, then remove the opt-out by hand in data/store.json.`);
-      const leads = leadsByPhone(store, phone);
-      if (!leads.length) fail(`no lead with ${prettyPhone(phone)}. Import it first.`);
-      for (const l of leads) {
-        l.consent = true;
-        l.consentSource = source;
-        l.consentAt = now.toISOString();
-      }
-      saveStore(DATA, store);
-      console.log(`Permission to text recorded for ${leads.map((l) => l.name || "unnamed").join(", ")}.`);
-      return;
-    }
-
-    case "handled": {
-      const phone = needPhone(args[0]);
-      const n = clearHandoffs(store, phone, { now });
-      saveStore(DATA, store);
-      console.log(n ? `Cleared ${n} repl${n === 1 ? "y" : "ies"} for ${prettyPhone(phone)}.` : "Nothing open for that number.");
-      return;
+    case "serve": {
+      const port = flags.port ? Number(flags.port) : 4777;
+      const { urls } = await startServer({
+        dataDir: DATA,
+        config,
+        port,
+        lan: Boolean(flags.lan),
+        nowFn: flags.now ? () => now : () => new Date(),
+      });
+      console.log("Command Center is running. Private: only works with this link.");
+      for (const u of urls) console.log("  " + u);
+      if (flags.lan) console.log("Phones on the same Wi-Fi can use the second link. Don't share it.");
+      console.log("Leave this window open. Ctrl+C to stop.");
+      return new Promise(() => {});
     }
 
     case "status": {

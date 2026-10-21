@@ -140,6 +140,8 @@ export function importLeads(store, csvText, { now = new Date(), sourceFile = "im
     if (existing) {
       // Newer export wins on facts, but a blank cell never erases what we had.
       for (const [k, v] of Object.entries(fields)) {
+        // A showed/no-show Jamal tapped beats a stale export.
+        if (k === "showed" && existing.showedMarkedAt) continue;
         if (v !== "" && v !== null && v !== undefined) existing[k] = v;
       }
       if (consentCell === true && existing.consent !== true) {
