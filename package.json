@@ -1,0 +1,18 @@
+{
+  "name": "phone-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Drafts-first SMS follow-up engine for Jamal's Woburn Toyota leads. Zero dependencies.",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "phone-agent": "src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "drafts": "node src/cli.js drafts",
+    "status": "node src/cli.js status"
+  }
+}

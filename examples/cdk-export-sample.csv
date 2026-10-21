@@ -1,0 +1,11 @@
+Customer Name,Cell Phone,Email,Vehicle of Interest,Status,Lead Date,Next Follow Up,Appt Date,Showed,Test Drive Date,OK to Text,Source
+Maria Gonzalez,(617) 555-0101,maria@example.com,RAV4 Hybrid,Working,10/14/2026,10/20/2026,,,,Y,Internet
+Derek Chen,781-555-0102,derek@example.com,Camry,New,10/21/2026,,,,,Y,Instagram
+Ashley Brooks,508.555.0103,,Tacoma,Appointment Set,10/10/2026,,10/20/2026,N,,Y,Walk-in
+Kevin Patel,+1 (339) 555-0104,kevin@example.com,Highlander Hybrid,Test Drive,10/12/2026,10/25/2026,,,10/21/2026,Y,Phone
+Linda Brooks,508-555-0103,,Corolla Cross,Working,10/01/2026,10/19/2026,,,,Y,Walk-in
+Tom Rivera,617-555-0105,tom@example.com,Sienna,Working,10/05/2026,10/18/2026,,,,,Internet
+Sam Ortiz,617-555-0106,,Prius,Sold,09/20/2026,10/15/2026,,,,Y,Referral
+Nina Walsh,617-555-0107,nina@example.com,Grand Highlander,Appointment Set,10/15/2026,10/20/2026,10/23/2026,,,Y,Internet
+Bad Phone Guy,555-1234,,Corolla,Working,10/01/2026,10/20/2026,,,,Y,Internet
+jordan lee,617-555-0108,,,Working,10/02/2026,10/21/2026,,,,yes,Instagram

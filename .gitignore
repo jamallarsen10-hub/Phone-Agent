@@ -1,0 +1,10 @@
+# Real customer data never goes in git.
+data/
+out/
+*.csv
+!examples/*.csv
+.env
+.env.*
+node_modules/
+.DS_Store
+Thumbs.db
