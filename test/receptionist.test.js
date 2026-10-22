@@ -8,7 +8,7 @@ import { decodeAttributedBody, newRepliesSql, rowToMessage } from "../src/messag
 import { sendDraft } from "../src/send.js";
 
 // Nothing here can text anyone: every provider is a fake that records calls.
-const JAMAL = "+13393683396";
+const JAMAL = "+16175550100";
 const cfg = (o = {}) => config({ mode: "auto", autoReplies: true, alertPhone: JAMAL, ...o });
 const WED_9PM = new Date("2026-10-22T01:00:00Z"); // after hours
 const fakeProvider = () => {

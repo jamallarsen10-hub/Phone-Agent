@@ -4,6 +4,7 @@ import { sendDraft } from "./send.js";
 import { openHandoffs } from "./store.js";
 import { toE164, prettyPhone } from "./phone.js";
 import { TEMPLATES } from "./templates.js";
+import { undelivered, deliverySummary } from "./delivery.js";
 
 /**
  * The phone's way in: one line of plain text -> one fixed engine action -> a
@@ -24,7 +25,7 @@ send <id> [id…] — text it now from your Mac
 skip <id> — drop a draft
 sent <id> — you texted it yourself
 sold | lost | showed | noshow <name or phone>
-handled <name or phone> — you answered their reply
+handled <name or phone> — you answered their reply / reached them after a failed text
 status — totals`;
 
 const VERBS = new Set(["help", "due", "today", "coming", "send", "skip", "sent", "sold", "lost", "showed", "noshow", "no-show", "handled", "status"]);
@@ -85,6 +86,11 @@ function dueText(store, ctx) {
       lines.push(`• ${who}${said ? `: "${said}"` : ""}`);
     }
   }
+  const lost = undelivered(store, ctx.now);
+  if (lost.length) {
+    lines.push(`${lost.length} text${lost.length === 1 ? "" : "s"} DIDN'T ARRIVE (reach them yourself, then "handled <name>"):`);
+    for (const m of lost.slice(0, 5)) lines.push(`• ${nameOf(store, m)}: ${label(m.template)} (${m.delivery.state}${m.delivery.service ? ", " + m.delivery.service : ""})`);
+  }
   if (r.callList.length) lines.push(`${r.callList.length} to call (no text OK).`);
   if (mine.length) lines.push(`Reply "send ${mine[0].id}" or "skip ${mine[0].id}".`);
   return lines.join("\n");
@@ -118,6 +124,13 @@ function why(r) {
   return map[r.reason] || [r.reason, r.detail].filter(Boolean).join(": ").toLowerCase();
 }
 
+function deliveryLine(d) {
+  const total = Object.values(d).reduce((a, b) => a + b, 0);
+  if (!total) return "Delivery (7 days): no Mac texts yet";
+  const bad = d.failed + d.unconfirmed + d.missing;
+  return `Delivery (7 days): ${d.delivered} delivered, ${d.accepted} sent as SMS, ${bad} didn't arrive${d.pending + d.unchecked ? `, ${d.pending + d.unchecked} checking` : ""}`;
+}
+
 export async function runPipe(text, store, { now, config, provider = null }) {
   const ctx = { now, config };
   const { verb, rest } = parsePipe(text);
@@ -135,6 +148,7 @@ export async function runPipe(text, store, { now, config, provider = null }) {
         `Leads: ${leads.length} (${leads.filter((l) => l.consent === true).length} OK to text)`,
         `Sold: ${leads.filter((l) => l.stage === "Sold").length}. Lost: ${leads.filter((l) => l.stage === "Lost").length}`,
         `Texts sent today: ${sentToday}. Replies waiting: ${openHandoffs(store).length}`,
+        deliveryLine(deliverySummary(store, now)),
         `Mac sending: ${config.killSwitch ? "OFF (kill switch)" : config.mode === "auto" ? "armed" : "off (drafts mode)"}`,
       ].join("\n"),
       changed: false,
@@ -185,6 +199,15 @@ export async function runPipe(text, store, { now, config, provider = null }) {
   const f = findLead(store, rest.join(" "));
   if (f.error) return { reply: f.error, changed: false };
   const args = verb === "handled" ? { phone: f.lead.phone } : { leadId: f.lead.id };
+  // "handled" also clears any didn't-arrive flag for that number.
+  let cleared = 0;
+  if (verb === "handled")
+    for (const m of undelivered(store, now))
+      if (m.phone === f.lead.phone) {
+        m.delivery.handledAt = now.toISOString();
+        cleared++;
+      }
   const r = runAction(verb, args, store, ctx);
-  return { reply: r.ok ? r.label : `${f.lead.name || "Lead"}: ${why(r)}`, changed: r.ok };
+  if (!r.ok && cleared) return { reply: `${f.lead.name || "Lead"}: cleared ${cleared} didn't-arrive flag${cleared === 1 ? "" : "s"}`, changed: true };
+  return { reply: r.ok ? r.label + (cleared ? ` (and cleared ${cleared} didn't-arrive flag${cleared === 1 ? "" : "s"})` : "") : `${f.lead.name || "Lead"}: ${why(r)}`, changed: r.ok || cleared > 0 };
 }

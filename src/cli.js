@@ -20,6 +20,7 @@ import { withStoreLock } from "./lock.js";
 import { toCSV } from "./csv.js";
 import { checkReplies } from "./receptionist.js";
 import { readNewReplies, readMaxRow, DEFAULT_DB } from "./messagesDb.js";
+import { checkDeliveries, readOutgoing } from "./delivery.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DATA = resolve(process.env.PHONE_AGENT_DATA || join(ROOT, "data"));
@@ -47,6 +48,7 @@ Setup and fixes:
   auto [--once] [--live]     Confirmations and reminders on your Mac. Dry run unless mode is "auto" AND --live.
                              On a Mac it also reads lead replies from Messages (the receptionist).
   messages-check             Can the engine read Messages? (needs Full Disk Access for Terminal). Sends nothing.
+  delivery                   Did the last 2 days of Mac texts actually arrive? Read-only: sends and saves nothing.
 
 Options:  --now 2026-10-20T10:00:00-04:00   pretend it is another time (testing)
 Env:      KILL_SWITCH=true stops every text. PHONE_AGENT_DATA, PHONE_AGENT_OUT move folders.`;
@@ -305,6 +307,28 @@ async function main() {
       return;
     }
 
+    case "delivery": {
+      // Read-only on purpose: works on a copy, never saves, never texts or alerts.
+      const db = config.messagesDb || DEFAULT_DB;
+      const store = loadStore(DATA);
+      try {
+        await checkDeliveries(store, { now, config, read: (since) => readOutgoing(since, { db }) });
+      } catch (e) {
+        if (e.code === "NO_ACCESS")
+          fail("Can't read Messages. Open System Settings > Privacy & Security > Full Disk Access, turn on Terminal, then quit and reopen Terminal.");
+        fail(`Can't read Messages: ${e.message}`);
+      }
+      const recent = store.outbound.filter((m) => m.status === "sent" && m.via === "mac-messages" && m.delivery);
+      if (!recent.length) console.log("No texts sent from this Mac in the last 2 days.");
+      const word = { delivered: "DELIVERED", accepted: "SENT as SMS (carriers give no receipt)", pending: "waiting for Messages", failed: "NOT DELIVERED", unconfirmed: "NO DELIVERY RECEIPT", missing: "NOT IN MESSAGES" };
+      for (const m of recent) {
+        const who = (m.leadId && store.leads[m.leadId]?.name) || prettyPhone(m.phone);
+        console.log(`[${m.id}] ${who} ${m.template} at ${m.attemptAt || m.sentAt}: ${word[m.delivery.state] || m.delivery.state}${m.delivery.service ? " via " + m.delivery.service : ""}${m.delivery.error ? " (error " + m.delivery.error + ")" : ""}`);
+      }
+      console.log("Nothing was sent or saved. The running engine records this on its own.");
+      return;
+    }
+
     case "auto": {
       const state = autoState(config, { live: Boolean(flags.live) });
       for (const n of state.notes) console.log(n);
@@ -368,6 +392,21 @@ async function main() {
           const s = loadStore(DATA);
           return autoTick(s, { now: t, config, provider, persist: () => saveStore(DATA, s) });
         });
+        // Delivery check: did what we sent actually arrive? Alerts you once if not.
+        if (msgDb && !msgProblem) {
+          try {
+            const dr = await withStoreLock(DATA, async () => {
+              const s = loadStore(DATA);
+              return checkDeliveries(s, { now: t, config, provider, persist: () => saveStore(DATA, s), read: (since) => readOutgoing(since, { db: msgDb }) });
+            });
+            for (const c of dr.changed) console.log(`${t.toISOString()} delivery [${c.id}] ${c.template} to ${prettyPhone(c.to)}: ${c.state}${c.service ? " via " + c.service : ""}`);
+            for (const r of dr.retries) console.log(`${t.toISOString()} retried [${r.id}] once as SMS`);
+            for (const a of dr.alerts) console.log(`${t.toISOString()} alert (not delivered) sent to you`);
+            for (const f of dr.failed) console.error(`${t.toISOString()} delivery-check send failed: ${f.detail}. Not retried.`);
+          } catch (e) {
+            if (e.code !== "STORE_BUSY") console.error(`${t.toISOString()} delivery check skipped: ${e.message}`);
+          }
+        }
         const stamp = t.toISOString();
         for (const m of rep.sent) console.log(`${stamp} sent [${m.id}] ${m.template} to ${prettyPhone(m.to)}`);
         for (const m of rep.wouldSend)

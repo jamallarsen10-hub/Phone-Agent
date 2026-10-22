@@ -168,6 +168,25 @@ With only one of them, or with `KILL_SWITCH=true`, `auto` runs as a dry run: it 
 
 Whether Woburn Toyota is fine with this is still your call (see **Not built yet**). None of this is legal advice. Confirm texting rules with the dealership before turning on automatic sending.
 
+## Did it actually arrive? (delivery check)
+
+Messages accepting a text is not the same as the person getting it. An iMessage
+to an Android phone, or an SMS with Text Message Forwarding off, is accepted and
+then quietly fails. While `auto` runs, the engine reads Messages' history
+(read-only, needs Full Disk Access for Terminal) and records each Mac text as
+**delivered**, **sent as SMS** (carriers give no receipt), or one of three
+problems: **not delivered**, **no delivery receipt after 15 min**, or **never
+showed up in Messages after 5 min**. On a problem it texts you (alertPhone)
+once, and `due` from your phone lists it until you reach them and send
+`handled <name>`. `status` shows the 7-day counts.
+
+It never resends by itself. Optional: `"smsRetry": true` in data/config.json
+tries a failed iMessage ONCE as SMS. Only turn it on after Text Message
+Forwarding is on for this Mac (iPhone: Settings > Apps > Messages > Text Message Forwarding).
+
+Check by hand (sends and saves nothing): `node src/cli.js delivery`, or
+double-click `~/Check Deliveries.command`.
+
 ## CDK export columns
 
 Header matching ignores case and punctuation. Unknown columns are listed and ignored. Nothing is ever deleted on re-import, and a blank cell never erases what was there.

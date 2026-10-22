@@ -31,9 +31,9 @@ const DEFAULT_TIMEOUT_MS = 30000;
  *  - The fallback to SMS happens ONLY if picking the iMessage account or
  *    participant fails, i.e. before anything is sent. `send` runs once,
  *    outside the try, so a fallback can never produce a second text.
- *  - Known gap: an iMessage to an Android number is usually accepted by
- *    Messages without error and then shows "Not Delivered", which this
- *    script cannot see. Android leads need the SMS path / a delivery check.
+ *  - An iMessage to an Android number is usually accepted by Messages without
+ *    error and then shows "Not Delivered". This script can't see that;
+ *    src/delivery.js reads it back from chat.db afterwards and alerts Jamal.
  *  - The script returns the service it used ("iMessage" or "SMS"); send()
  *    passes it back and the engine records it on the message as `service`.
  *  - Verified on macOS 15.5: `account ... whose service type = X` and
@@ -64,10 +64,30 @@ export const APPLESCRIPT_LINES = Object.freeze([
   "end run",
 ]);
 
+/**
+ * SMS only, no iMessage. Used just once per text, by the opt-in SMS retry in
+ * src/delivery.js, after Messages itself marked the iMessage Not Delivered
+ * (usually an Android number). Needs Text Message Forwarding on the iPhone.
+ */
+export const APPLESCRIPT_SMS_LINES = Object.freeze([
+  "on run argv",
+  "set thePhone to item 1 of argv",
+  "set theBody to item 2 of argv",
+  'tell application "Messages" to launch',
+  "delay 1",
+  'tell application "Messages"',
+  "set s to 1st account whose service type = SMS",
+  "set b to participant thePhone of s",
+  "send theBody to b",
+  "end tell",
+  'return "SMS"',
+  "end run",
+]);
+
 /** Builds the osascript argument list: static script, then phone, then body. */
-export function buildOsascriptArgs(phone, body) {
+export function buildOsascriptArgs(phone, body, { service } = {}) {
   const args = [];
-  for (const line of APPLESCRIPT_LINES) args.push("-e", line);
+  for (const line of service === "SMS" ? APPLESCRIPT_SMS_LINES : APPLESCRIPT_LINES) args.push("-e", line);
   // The phone is first, and always starts with "+", so osascript's option
   // parsing stops there and the body is taken as plain data even if it starts with "-".
   args.push(phone, body);
@@ -110,7 +130,8 @@ export function macMessagesProvider({
 
   return {
     name: "mac-messages",
-    async send({ to, body, idempotencyKey }) {
+    async send({ to, body, idempotencyKey, service: force }) {
+      if (force !== undefined && force !== "SMS") throw new Error(`unknown service: ${String(force)}`);
       if (!isE164US(to)) throw new Error(`not a valid US number: ${String(to)}`);
       if (typeof body !== "string" || !body.trim()) throw new Error("empty message");
       if (body.length > MAX_BODY) throw new Error(`message too long (${body.length} > ${MAX_BODY})`);
@@ -123,7 +144,7 @@ export function macMessagesProvider({
       }
       lastSendAt = clock();
 
-      const res = await exec("osascript", buildOsascriptArgs(to, body), { timeout: timeoutMs });
+      const res = await exec("osascript", buildOsascriptArgs(to, body, { service: force }), { timeout: timeoutMs });
       const out = String((res && res.stdout) || "").trim();
       const service = out === "iMessage" || out === "SMS" ? out : "unknown";
       return { id: "mac-" + idempotencyKey, service };

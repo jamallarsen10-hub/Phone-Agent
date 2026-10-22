@@ -51,6 +51,15 @@ export const DEFAULTS = Object.freeze({
   replyCooldownMinutes: 120,
   // Path to Messages' chat.db. Empty = the standard ~/Library/Messages/chat.db.
   messagesDb: "",
+  // Delivery check (src/delivery.js): reads Messages history to see whether each
+  // text the engine sent actually arrived, and alerts alertPhone when one didn't.
+  // An iMessage with no delivery receipt after this long is flagged.
+  unconfirmedAfterMinutes: 15,
+  // A text that never shows up in Messages' history after this long is flagged.
+  missingAfterMinutes: 5,
+  // When Messages marks an iMessage Not Delivered (usually an Android number),
+  // try it ONCE as SMS. Needs Text Message Forwarding on the iPhone. Off by default.
+  smsRetry: false,
 });
 
 export function loadConfig(dataDir, env = process.env) {
@@ -85,6 +94,9 @@ export function validateConfig(cfg) {
   if (!Array.isArray(cfg.autoTemplates)) throw new Error("autoTemplates must be a list of template names");
   if (cfg.alertPhone && !/^\+1[2-9]\d{2}[2-9]\d{6}$/.test(cfg.alertPhone))
     throw new Error('alertPhone must look like "+13395551234"');
+  if (!(cfg.unconfirmedAfterMinutes >= 1)) throw new Error("unconfirmedAfterMinutes must be at least 1");
+  if (!(cfg.missingAfterMinutes >= 1)) throw new Error("missingAfterMinutes must be at least 1");
+  if (typeof cfg.smsRetry !== "boolean") throw new Error("smsRetry must be true or false");
   if (!(cfg.replyCooldownMinutes >= 1)) throw new Error("replyCooldownMinutes must be at least 1");
   const unknown = cfg.autoTemplates.filter((t) => !Object.prototype.hasOwnProperty.call(TEMPLATES, t));
   if (unknown.length)
