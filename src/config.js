@@ -40,6 +40,17 @@ export const DEFAULTS = Object.freeze({
   // the confirmation text is "booking-confirm". Everything else stays a draft
   // you send yourself.
   autoTemplates: Object.freeze(["booking-confirm", "reminder-night", "reminder-2h"]),
+  // Receptionist: read lead replies from Messages and answer the safe ones
+  // (confirmed, booking link, address, "I'll call you shortly") on their own,
+  // plus STOP/HELP answers. Off unless set true in data/config.json.
+  autoReplies: false,
+  // Where buying-signal alerts go (Jamal's own cell). Empty = no alerts.
+  alertPhone: "",
+  dealerAddress: "394 Washington St, Woburn, MA 01801",
+  // At most one automatic answer per number in this many minutes; after that, alert only.
+  replyCooldownMinutes: 120,
+  // Path to Messages' chat.db. Empty = the standard ~/Library/Messages/chat.db.
+  messagesDb: "",
 });
 
 export function loadConfig(dataDir, env = process.env) {
@@ -72,6 +83,9 @@ export function validateConfig(cfg) {
   if (!["drafts", "auto"].includes(cfg.mode)) throw new Error('mode must be "drafts" or "auto"');
   if (!(cfg.maxPerPhonePerDay >= 1)) throw new Error("maxPerPhonePerDay must be at least 1");
   if (!Array.isArray(cfg.autoTemplates)) throw new Error("autoTemplates must be a list of template names");
+  if (cfg.alertPhone && !/^\+1[2-9]\d{2}[2-9]\d{6}$/.test(cfg.alertPhone))
+    throw new Error('alertPhone must look like "+13395551234"');
+  if (!(cfg.replyCooldownMinutes >= 1)) throw new Error("replyCooldownMinutes must be at least 1");
   const unknown = cfg.autoTemplates.filter((t) => !Object.prototype.hasOwnProperty.call(TEMPLATES, t));
   if (unknown.length)
     throw new Error(`autoTemplates has unknown template(s): ${unknown.join(", ")}. Known: ${Object.keys(TEMPLATES).join(", ")}`);

@@ -49,7 +49,7 @@ const vars = { firstName: "Maria", vehicle: "RAV4 Hybrid", senderName: "Jamal", 
 test("templates: every outreach text names Jamal + dealership, ends with opt-out", () => {
   assert.equal(validateTemplates(), true);
   for (const [name, t] of Object.entries(TEMPLATES)) {
-    if (t.kind === "opt-out-confirm") continue;
+    if (t.kind === "opt-out-confirm" || t.kind === "reply") continue; // replies: test/receptionist.test.js
     for (const v of [vars, { ...vars, vehicle: "" }]) {
       const out = render(name, v);
       assert.ok(out.includes("Jamal") && out.includes("Woburn Toyota"), name);

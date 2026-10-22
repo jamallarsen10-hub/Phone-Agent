@@ -23,6 +23,9 @@ export const EMPTY = () => ({
   handoffs: [],
   notionQueue: [],
   notionSync: null,
+  // Receptionist: last Messages ROWID already looked at (null = start from now), and alerts sent to Jamal.
+  replyCursor: null,
+  alerts: [],
 });
 
 export function storePath(dataDir) {

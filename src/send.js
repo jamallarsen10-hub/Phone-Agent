@@ -1,5 +1,9 @@
 import { canSend } from "./guardrails.js";
 import { priceFlags } from "./priceBlock.js";
+import { TEMPLATES } from "./templates.js";
+
+/** Answers to a lead's own text. With config.autoReplies on, these may go out on their own. */
+export const AUTO_REPLY_KINDS = new Set(["reply", "response", "opt-out-confirm"]);
 
 /**
  * Recording and sending. Two paths, one gate.
@@ -47,11 +51,12 @@ export async function sendDraft(store, id, { now, config, provider, approved = f
   // out on their own. A missing list means none (fail closed).
   // `approved` = Jamal picked this exact draft by id from his phone. It lifts
   // only the autoTemplates limit; every check below still runs.
-  if (!provider.dryRun && !approved && !(config.autoTemplates || []).includes(m.template))
+  const autoReply = config.autoReplies === true && AUTO_REPLY_KINDS.has(TEMPLATES[m.template]?.kind);
+  if (!provider.dryRun && !approved && !autoReply && !(config.autoTemplates || []).includes(m.template))
     return { ok: false, reason: "TEMPLATE_NOT_AUTO", detail: `${m.template} is not in autoTemplates; send it yourself` };
 
   const lead = m.leadId ? store.leads[m.leadId] : null;
-  const check = canSend(store, { lead, phone: m.phone, template: m.template }, { now, config, checkHours: true });
+  const check = canSend(store, { lead, phone: m.phone, template: m.template, selfId: m.id }, { now, config, checkHours: true });
   if (!check.ok) return check;
   const flags = priceFlags(m.body);
   if (flags.length) return { ok: false, reason: "PRICE_BLOCK", detail: flags.join(", ") };

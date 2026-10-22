@@ -18,6 +18,8 @@ import { toE164, prettyPhone } from "./phone.js";
 import { runPipe } from "./pipe.js";
 import { withStoreLock } from "./lock.js";
 import { toCSV } from "./csv.js";
+import { checkReplies } from "./receptionist.js";
+import { readNewReplies, readMaxRow, DEFAULT_DB } from "./messagesDb.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DATA = resolve(process.env.PHONE_AGENT_DATA || join(ROOT, "data"));
@@ -42,7 +44,9 @@ Setup and fixes:
   status                     Counts, opt-outs, open replies
   pipe "<text>"              One phone command (due, send <id>, sold <name>…); used by Mac Remote
   send --dry-run             Run drafts through the automatic path without sending
-  auto [--once] [--live]     Confirmations and reminders on your Mac. Dry run unless mode is "auto" AND --live
+  auto [--once] [--live]     Confirmations and reminders on your Mac. Dry run unless mode is "auto" AND --live.
+                             On a Mac it also reads lead replies from Messages (the receptionist).
+  messages-check             Can the engine read Messages? (needs Full Disk Access for Terminal). Sends nothing.
 
 Options:  --now 2026-10-20T10:00:00-04:00   pretend it is another time (testing)
 Env:      KILL_SWITCH=true stops every text. PHONE_AGENT_DATA, PHONE_AGENT_OUT move folders.`;
@@ -280,6 +284,27 @@ async function main() {
       return;
     }
 
+    case "messages-check": {
+      const db = config.messagesDb || DEFAULT_DB;
+      try {
+        const max = await readMaxRow({ db });
+        const rows = await readNewReplies(Math.max(0, max - 300), { db });
+        const store = loadStore(DATA);
+        const leadMsgs = rows.filter((m) => {
+          const p = toE164(m.handle);
+          return p && leadsByPhone(store, p).length;
+        });
+        console.log(`OK: Messages is readable (${max} messages in history).`);
+        console.log(`Of the last 300, ${rows.length} were incoming 1-to-1 texts, ${leadMsgs.length} from lead numbers.`);
+        console.log(`Receptionist answers: ${config.autoReplies ? "ON" : "OFF (set \"autoReplies\": true in data/config.json)"}. Alerts to: ${config.alertPhone ? prettyPhone(config.alertPhone) : "nobody (set \"alertPhone\")"}.`);
+      } catch (e) {
+        if (e.code === "NO_ACCESS")
+          fail("Can't read Messages. Open System Settings > Privacy & Security > Full Disk Access, turn on Terminal, then quit and reopen Terminal.");
+        fail(`Can't read Messages: ${e.message}`);
+      }
+      return;
+    }
+
     case "auto": {
       const state = autoState(config, { live: Boolean(flags.live) });
       for (const n of state.notes) console.log(n);
@@ -296,6 +321,13 @@ async function main() {
       let lastSync = -Infinity;
       const shown = new Set();
       let first = true;
+      // The receptionist reads Messages only on a Mac (or when a test db is set).
+      const msgDb = config.messagesDb || (process.platform === "darwin" ? DEFAULT_DB : "");
+      let msgProblem = null;
+      if (msgDb)
+        console.log(
+          `Receptionist: reading lead replies from Messages. Auto-answers ${config.autoReplies ? "ON" : "OFF (drafts only)"}; alerts to ${config.alertPhone ? prettyPhone(config.alertPhone) : "nobody"}.`
+        );
 
       for (;;) {
         const t = flags.now ? now : new Date();
@@ -304,6 +336,33 @@ async function main() {
           lastSync = t.getTime();
           const r = await syncNotion(DATA, config, client, { now: t, graceMs: GRACE_MS });
           if (!r.ok) console.log(`Notion not reachable (${r.error}). Using the leads already saved.`);
+        }
+        if (msgDb) {
+          try {
+            const rr = await withStoreLock(DATA, async () => {
+              const s = loadStore(DATA);
+              return checkReplies(s, {
+                now: t,
+                config,
+                provider,
+                persist: () => saveStore(DATA, s),
+                read: (c) => readNewReplies(c, { db: msgDb }),
+                readMax: () => readMaxRow({ db: msgDb }),
+              });
+            });
+            if (msgProblem) console.log(`${t.toISOString()} Messages readable again.`);
+            msgProblem = null;
+            if (rr.initialized) console.log(`${t.toISOString()} Receptionist started: only replies from now on are handled.`);
+            for (const h of rr.handled) console.log(`${t.toISOString()} reply from ${prettyPhone(h.phone)}: "${h.text.slice(0, 80)}" -> ${h.action}${h.answered ? " [answered]" : ""}`);
+            for (const a of rr.alerts) console.log(`${t.toISOString()} alert (${a.kind}) sent to you`);
+            for (const x of rr.held) console.log(`${t.toISOString()} auto-answer held for ${prettyPhone(x.phone)}: ${x.reason}`);
+            for (const f of rr.failed) console.error(`${t.toISOString()} FAILED receptionist send: ${f.detail}. Not retried.`);
+            if (rr.stop) fail("Stopped after a failed send. Fix Messages, then start auto again.");
+          } catch (e) {
+            const why = e.code === "NO_ACCESS" ? "no Full Disk Access for Terminal (System Settings > Privacy & Security > Full Disk Access)" : e.message;
+            if (msgProblem !== why) console.error(`${t.toISOString()} Can't read replies from Messages: ${why}. Still sending reminders.`);
+            msgProblem = why;
+          }
         }
         const rep = await withStoreLock(DATA, async () => {
           const s = loadStore(DATA);
@@ -327,7 +386,8 @@ async function main() {
         }
         if (rep.stop) fail("Stopped after a failed send. Fix Messages, then start auto again.");
         if (flags.once) return;
-        await new Promise((r) => setTimeout(r, 60 * 1000));
+        // Every 30 seconds, so a lead's reply is answered within about half a minute.
+        await new Promise((r) => setTimeout(r, 30 * 1000));
       }
     }
 

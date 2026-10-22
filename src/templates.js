@@ -180,6 +180,30 @@ export const TEMPLATES = Object.freeze({
     generic:
       "{senderName} at {dealership}: reply here or call this number with any questions. Msg frequency varies. Msg & data rates may apply. " + OPT_OUT_LINE,
   },
+  // ---- Receptionist: automatic answers to a lead's own reply ----
+  // Short, conversational, mid-thread, so no opt-out line (the thread already
+  // has one). Never price, payment, trade value or availability: those go to
+  // Jamal, and the lead gets reply-hot ("I'll call you shortly") instead.
+  "reply-confirm": {
+    kind: "reply",
+    label: "Auto: confirmed",
+    generic: "Perfect, you're all set. See you then! - {senderName}, {dealership}",
+  },
+  "reply-book": {
+    kind: "reply",
+    label: "Auto: booking link",
+    generic: "Sure thing. Pick the time that works best for you here and you're locked in: {bookingUrl} - {senderName}, {dealership}",
+  },
+  "reply-address": {
+    kind: "reply",
+    label: "Auto: address",
+    generic: "We're at {dealership}, {dealerAddress}. Just ask for {senderName} at the front desk.",
+  },
+  "reply-hot": {
+    kind: "reply",
+    label: "Auto: calling shortly",
+    generic: "Good question. Let me pull that together and I'll give you a call shortly. - {senderName}, {dealership}",
+  },
   "opt-out-confirm": {
     kind: "opt-out-confirm",
     label: "Opt-out confirmation",
@@ -255,7 +279,7 @@ export function validateTemplates() {
     for (const body of [t.withVehicle, t.generic].filter(Boolean)) {
       if (!body.includes("{senderName}") || !body.includes("{dealership}"))
         throw new Error(`template ${name} must identify the sender and dealership`);
-      if (t.kind !== "opt-out-confirm" && !body.endsWith(OPT_OUT_LINE))
+      if (t.kind !== "opt-out-confirm" && t.kind !== "reply" && !body.endsWith(OPT_OUT_LINE))
         throw new Error(`template ${name} must end with "${OPT_OUT_LINE}"`);
       if (/[^\x20-\x7e]/.test(body)) throw new Error(`template ${name} must be plain ASCII`);
       if (/\{(price|payment|amount|msrp|apr|rate|discount)\}/i.test(body))

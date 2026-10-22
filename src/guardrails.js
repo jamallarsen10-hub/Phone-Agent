@@ -19,7 +19,8 @@ import { isOptedOut, sentTo, openHandoffs } from "./store.js";
  *   ALREADY_DONE     the one-time reply for this event already exists
  *   OUTSIDE_HOURS    only checked at send time, not when drafting
  */
-export function canSend(store, { lead, phone, template }, { now, config, checkHours = true }) {
+// selfId: the draft being sent right now, so it doesn't count as "already sent" against itself.
+export function canSend(store, { lead, phone, template, selfId = null }, { now, config, checkHours = true }) {
   const t = TEMPLATES[template];
   if (!t) return no("UNKNOWN_TEMPLATE", template);
   const number = phone || (lead && lead.phone);
@@ -35,16 +36,29 @@ export function canSend(store, { lead, phone, template }, { now, config, checkHo
     const out = store.optOuts[number];
     if (!out) return no("NOT_OPTED_OUT", "only sent after a STOP");
     const already = store.outbound.some(
-      (m) => m.phone === number && m.template === template && m.status !== "skipped" && m.createdAt >= out.at
+      (m) => m.id !== selfId && m.phone === number && m.template === template && m.status !== "skipped" && m.createdAt >= out.at
     );
     return already ? no("ALREADY_DONE", "confirmation already sent for this opt-out") : yes();
   }
 
   if (isOptedOut(store, number)) return no("OPTED_OUT", "this number replied STOP");
 
+  // Receptionist answers. They only exist because the lead just texted, so
+  // no consent/handoff/daily-cap checks; instead: an open lead, send hours,
+  // and a cooldown so a back-and-forth never turns into a bot conversation.
+  if (t.kind === "reply") {
+    if (!lead || lead.closed) return no("NOT_OPEN_LEAD", "only open leads get automatic answers");
+    if (lastReplyWithin(store, number, now, config, { pending: false }))
+      return no("REPLY_COOLDOWN", `already answered automatically in the last ${config.replyCooldownMinutes} min`);
+    if (checkHours && !withinSendWindow(now, config))
+      return no("OUTSIDE_HOURS", `texts go out ${config.sendStart}-${config.sendEnd} ${dayList(config.sendDays)}`);
+    return yes();
+  }
+
   if (t.kind === "response") {
     const repliedToday = store.outbound.some(
       (m) =>
+        m.id !== selfId &&
         m.phone === number &&
         m.template === template &&
         m.status !== "skipped" &&
@@ -76,6 +90,19 @@ export function canSend(store, { lead, phone, template }, { now, config, checkHo
     return no("OUTSIDE_HOURS", `texts go out ${config.sendStart}-${config.sendEnd} ${dayList(config.sendDays)}`);
 
   return yes();
+}
+
+/**
+ * An automatic answer to this number inside the cooldown. `pending` also counts
+ * drafts not yet sent (used when deciding whether to write a new one).
+ */
+export function lastReplyWithin(store, phone, now, config, { pending = true } = {}) {
+  const since = now.getTime() - (config.replyCooldownMinutes || 120) * 60000;
+  return store.outbound.some((m) => {
+    if (m.phone !== phone || TEMPLATES[m.template]?.kind !== "reply") return false;
+    const ok = m.status === "sent" || (pending && ["draft", "sending"].includes(m.status));
+    return ok && new Date(m.sentAt || m.createdAt).getTime() >= since;
+  });
 }
 
 export function withinSendWindow(now, config) {
