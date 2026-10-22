@@ -59,7 +59,7 @@ test("mac: phone and message go as arguments, never into the script", async () =
   const p = macMessagesProvider({ exec, platform: "darwin", sleep: async () => {} });
   const hostile = `He said "hi" \\ and\nthen: tell application "Finder" to delete every item -- ' ; end tell — $(rm -rf ~) \`x\``;
   const r = await p.send({ to: PHONE, body: hostile, idempotencyKey: "abc123" });
-  assert.deepEqual(r, { id: "mac-abc123" });
+  assert.deepEqual(r, { id: "mac-abc123", service: "unknown" });
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].file, "osascript");
@@ -74,11 +74,30 @@ test("mac: phone and message go as arguments, never into the script", async () =
   assert.ok(!script.join("\n").includes(PHONE), "the number is not in the script either");
   // The script text does not depend on the message at all.
   assert.deepEqual(buildOsascriptArgs(PHONE, "a").slice(0, -1), buildOsascriptArgs(PHONE, "something else").slice(0, -1));
-  // The script reads its inputs from argv and picks the SMS service.
+  // The script reads its inputs from argv, tries iMessage first, falls back to SMS.
   const text = APPLESCRIPT_LINES.join("\n");
   assert.match(text, /on run argv/);
-  assert.match(text, /1st account whose service type = SMS/);
   assert.match(text, /participant thePhone of s/);
+  const L = [...APPLESCRIPT_LINES];
+  const iMsg = L.indexOf("set s to 1st account whose service type = iMessage");
+  const sms = L.indexOf("set s to 1st account whose service type = SMS");
+  const onErr = L.indexOf("on error");
+  const endTry = L.indexOf("end try");
+  const send = L.indexOf("send theBody to b");
+  assert.ok(iMsg > -1 && sms > -1, "both services are named");
+  assert.ok(L.indexOf("try") < iMsg && iMsg < onErr && onErr < sms && sms < endTry, "iMessage in the try, SMS in the fallback");
+  assert.ok(send > endTry, "send runs once, after the account is picked, never inside the try");
+  assert.equal(L.filter((x) => /^send /.test(x)).length, 1, "exactly one send");
+  assert.equal(L.at(-2), "return usedService");
+});
+
+test("mac: reports which service Messages used", async () => {
+  const msg = { to: PHONE, body: "Hi", idempotencyKey: "k" };
+  const with_ = (stdout) => macMessagesProvider({ exec: async () => ({ stdout }), platform: "darwin", sleep: async () => {} });
+  assert.deepEqual(await with_("iMessage\n").send(msg), { id: "mac-k", service: "iMessage" });
+  assert.deepEqual(await with_("SMS\n").send(msg), { id: "mac-k", service: "SMS" });
+  assert.deepEqual(await with_("").send(msg), { id: "mac-k", service: "unknown" });
+  assert.deepEqual(await with_("SMS; junk").send(msg), { id: "mac-k", service: "unknown" });
 });
 
 test("mac: refuses to run anywhere but a Mac", () => {

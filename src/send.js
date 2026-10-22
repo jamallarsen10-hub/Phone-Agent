@@ -73,6 +73,7 @@ export async function sendDraft(store, id, { now, config, provider, approved = f
     m.sentAt = now.toISOString();
     m.via = provider.name;
     m.providerMessageId = res && res.id;
+    if (res && res.service) m.service = res.service;
     return { ok: true, message: m };
   } catch (e) {
     // Unknown outcome: do NOT flip back to draft, or a retry could double-text.

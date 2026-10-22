@@ -2,8 +2,8 @@ import { execFile } from "node:child_process";
 import { isE164US } from "../phone.js";
 
 /**
- * Sends a text through the Messages app on a Mac, which relays it as a normal
- * SMS from the iPhone signed in to the same Apple ID (Text Message Forwarding).
+ * Sends a text through the Messages app on a Mac: as iMessage when it can,
+ * otherwise as SMS relayed from the iPhone (Text Message Forwarding).
  * Same provider shape as the dry-run one: { name, send({ to, body, idempotencyKey }) }.
  *
  * What this can and cannot tell you:
@@ -24,13 +24,20 @@ const DEFAULT_GAP_MS = 5000;
 const DEFAULT_TIMEOUT_MS = 30000;
 
 /**
- * THE ONE PLACE TO ADJUST if the first live test fails (research notes):
- *  - Pick the SMS account with `1st account whose service type = SMS`.
- *    Verified on macOS 15.5: the older `service` class fails there with
- *    -10000 (AppleEvent handler failed); `account` works. Leaving the
- *    account out sends as iMessage instead of SMS.
- *  - `participant <phone> of s` (verified on macOS 15.5). `buddy` is the
- *    pre-Big Sur form.
+ * THE ONE PLACE TO ADJUST if a live test fails (research notes):
+ *  - iMessage first, SMS second (Jamal's call, Oct 21 2026): the Mac usually
+ *    sits at home away from his iPhone, so the SMS relay (Text Message
+ *    Forwarding) can't be counted on. iMessage goes straight from the Mac.
+ *  - The fallback to SMS happens ONLY if picking the iMessage account or
+ *    participant fails, i.e. before anything is sent. `send` runs once,
+ *    outside the try, so a fallback can never produce a second text.
+ *  - Known gap: an iMessage to an Android number is usually accepted by
+ *    Messages without error and then shows "Not Delivered", which this
+ *    script cannot see. Android leads need the SMS path / a delivery check.
+ *  - The script returns the service it used ("iMessage" or "SMS"); send()
+ *    passes it back and the engine records it on the message as `service`.
+ *  - Verified on macOS 15.5: `account ... whose service type = X` and
+ *    `participant <phone> of s` work; the older `service`/`buddy` forms fail.
  *  - Messages must be running, so it is launched first.
  * The script is a fixed list of lines. Nothing from a customer or a template
  * is ever added to it.
@@ -42,10 +49,18 @@ export const APPLESCRIPT_LINES = Object.freeze([
   'tell application "Messages" to launch',
   "delay 1",
   'tell application "Messages"',
+  'set usedService to "iMessage"',
+  "try",
+  "set s to 1st account whose service type = iMessage",
+  "set b to participant thePhone of s",
+  "on error",
+  'set usedService to "SMS"',
   "set s to 1st account whose service type = SMS",
   "set b to participant thePhone of s",
+  "end try",
   "send theBody to b",
   "end tell",
+  "return usedService",
   "end run",
 ]);
 
@@ -108,8 +123,10 @@ export function macMessagesProvider({
       }
       lastSendAt = clock();
 
-      await exec("osascript", buildOsascriptArgs(to, body), { timeout: timeoutMs });
-      return { id: "mac-" + idempotencyKey };
+      const res = await exec("osascript", buildOsascriptArgs(to, body), { timeout: timeoutMs });
+      const out = String((res && res.stdout) || "").trim();
+      const service = out === "iMessage" || out === "SMS" ? out : "unknown";
+      return { id: "mac-" + idempotencyKey, service };
     },
   };
 }
