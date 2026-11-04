@@ -1,0 +1,4 @@
+#!/bin/sh
+# Blocks commits that would publish seller, customer or deal data.
+# Installed automatically by the CLI (git config core.hooksPath .githooks).
+exec node "$(git rev-parse --show-toplevel)/scripts/privacy-guard.js"

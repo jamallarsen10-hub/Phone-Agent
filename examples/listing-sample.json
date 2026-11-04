@@ -1,0 +1,80 @@
+{
+  "slug": "maple-st",
+  "address": "100 Example Maple St",
+  "cityStateZip": "Springfield, FL 30000",
+  "mlsNumber": "X00000000",
+  "agreementDate": "2026-01-15",
+  "currentPrice": 389000,
+  "facts": {
+    "beds": 3,
+    "baths": 2,
+    "sqft": 1760,
+    "yearBuilt": 1987,
+    "tenantOccupied": true
+  },
+  "sellers": [
+    {
+      "name": "Pat Sample",
+      "phone": "555-010-0001",
+      "email": "pat@example.com"
+    },
+    {
+      "name": "Robin Sample",
+      "phone": "",
+      "email": "robin@example.com",
+      "family": true,
+      "callName": "Mom"
+    }
+  ],
+  "listingAgent": {
+    "name": "Your Name",
+    "brokerage": "Example Realty",
+    "phone": "555-010-0009",
+    "email": "you@example.com"
+  },
+  "coAgent": {
+    "name": "Casey Agent",
+    "brokerage": "Example Realty",
+    "phone": "555-010-0010",
+    "email": "casey@example.com"
+  },
+  "comps": [
+    {
+      "address": "120 Example Maple St",
+      "price": 315000,
+      "date": "2026-04-29",
+      "beds": 3,
+      "baths": 2,
+      "sqft": 1802,
+      "note": "updated, sold over asking"
+    },
+    {
+      "address": "200 Example Maple St",
+      "price": 455000,
+      "date": "2026-05-21",
+      "beds": 4,
+      "baths": 3,
+      "sqft": 1818,
+      "note": "larger home"
+    }
+  ],
+  "offers": [
+    {
+      "buyer": "Example Investors LLC",
+      "contactName": "Sam Buyer",
+      "email": "sam@example.com",
+      "amount": 275000,
+      "terms": "cash, as-is",
+      "date": "2026-10-29",
+      "status": "their max"
+    }
+  ],
+  "priceHistory": [
+    {
+      "price": 399000,
+      "at": "2026-09-01T12:00:00Z",
+      "reason": "starting price"
+    }
+  ],
+  "pendingChange": null
+}

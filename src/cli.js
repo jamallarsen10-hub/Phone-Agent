@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
@@ -14,6 +14,8 @@ import { startServer } from "./server.js";
 import { notionClient, syncNotion } from "./notion.js";
 import { toE164, prettyPhone } from "./phone.js";
 import { toCSV } from "./csv.js";
+import { execFileSync } from "node:child_process";
+import { runListing } from "./listing/cli.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DATA = resolve(process.env.PHONE_AGENT_DATA || join(ROOT, "data"));
@@ -28,6 +30,14 @@ Daily:
   sent <id> [id...]          Log texts you sent from the file version
   sold|lost <phone>          Stop follow-ups for a lead
 
+Listings (price changes for a house you're selling):
+  listing                    All listings and where each price change stands
+  listing new <name> --address "..." --price 389000   Start a private listing file
+  listing price <name> <new price> [--reason "..."]   Build the packet: seller texts/emails, form to sign
+  listing signed <name> <seller # or name>            Log a signature (--undo to take it back)
+  listing live <name>        The new price is on MLS: record it, unlock buyer follow-ups
+  listing packet <name>      Rebuild the packet after editing the listing file
+
 Setup and fixes:
   sync                       Pull the Notion Lead Pipeline now and save any taps waiting to go out
   import <export.csv>        Load or refresh leads from a CDK export (never deletes)
@@ -39,7 +49,30 @@ Setup and fixes:
   send --dry-run             Run drafts through the automatic path without sending
 
 Options:  --now 2026-10-20T10:00:00-04:00   pretend it is another time (testing)
-Env:      KILL_SWITCH=true stops every text. PHONE_AGENT_DATA, PHONE_AGENT_OUT move folders.`;
+Env:      KILL_SWITCH=true stops every text. PHONE_AGENT_DATA, PHONE_AGENT_OUT move folders.
+
+Privacy:  Real names, numbers and addresses live only in data/ (never committed).
+          A commit guard blocks them from git; run "npm run privacy" to audit the repo.`;
+
+/**
+ * Turn on the privacy commit guard (.githooks/pre-commit) in this clone.
+ * Best effort and silent when already on; never blocks the command.
+ */
+function ensureCommitGuard() {
+  if (!existsSync(join(ROOT, ".git")) || !existsSync(join(ROOT, ".githooks", "pre-commit"))) return;
+  try {
+    const cur = execFileSync("git", ["-C", ROOT, "config", "--get", "core.hooksPath"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (cur === ".githooks") return;
+  } catch {
+    /* not set yet */
+  }
+  try {
+    execFileSync("git", ["-C", ROOT, "config", "core.hooksPath", ".githooks"], { stdio: "ignore" });
+    console.log("Privacy guard on: commits that contain seller or customer data will be blocked.");
+  } catch {
+    /* git missing: .gitignore still keeps data/ out */
+  }
+}
 
 function parseArgs(argv) {
   const args = [];
@@ -98,6 +131,7 @@ async function main() {
   const { args, flags } = parseArgs(process.argv.slice(2));
   const cmd = args.shift();
   if (!cmd || cmd === "help" || flags.help) return console.log(HELP);
+  ensureCommitGuard();
 
   const config = loadConfig(DATA);
   const now = flags.now ? new Date(flags.now) : new Date();
@@ -249,6 +283,9 @@ async function main() {
       saveStore(DATA, store);
       return;
     }
+
+    case "listing":
+      return runListing(args, flags, { dataDir: DATA, outDir: OUT, now, fail });
 
     default:
       fail(`unknown command "${cmd}". Run with no arguments for help.`);
