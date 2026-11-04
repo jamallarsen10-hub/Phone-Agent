@@ -13,6 +13,8 @@
   "scripts": {
     "test": "node --test",
     "drafts": "node src/cli.js drafts",
-    "status": "node src/cli.js status"
+    "status": "node src/cli.js status",
+    "privacy": "node scripts/privacy-guard.js --all",
+    "setup": "git config core.hooksPath .githooks && echo Privacy guard on."
   }
 }

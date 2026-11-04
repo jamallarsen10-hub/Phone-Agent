@@ -137,6 +137,40 @@ PHONE_AGENT_DATA=/tmp/pa/data PHONE_AGENT_OUT=/tmp/pa/out node src/cli.js import
 PHONE_AGENT_DATA=/tmp/pa/data PHONE_AGENT_OUT=/tmp/pa/out node src/cli.js drafts --now 2026-10-21T10:00:00-04:00
 ```
 
+## Selling a house: price changes
+
+For a listing you're the agent on. One command builds everything a price change needs. Nothing is sent for you.
+
+```
+node src/cli.js listing new maple-st --address "100 Maple St" --price 389000   # once per listing
+node src/cli.js listing price maple-st 339900 --reason "comps"                 # build the packet
+node src/cli.js listing signed maple-st 1                                       # as each seller signs
+node src/cli.js listing live maple-st                                           # once MLS shows it
+```
+
+`listing price` writes three files to `out/listings/<name>/`:
+- **packet.html**: for each seller, a text and an email with the comps and offers, each with **Open in Messages / Mail**. Also a heads-up to your co-agent, a signature tracker, and the MLS checklist.
+- **addendum.html**: the one-page *Seller Authorization to Change List Price*, with a signature line for every seller. Print it or save it as a PDF. If your brokerage requires its own dotloop form, use that form with the same numbers.
+- **messages.txt**: the same messages as plain text.
+
+Safety checks:
+- A typo like `33990` is refused: anything more than 50% from the current price needs `--force`.
+- `live` is refused until every seller has signed.
+- Follow-ups to the buyers who made offers are only shown once the new price is live.
+
+Fill in the listing file at `data/listings/<name>.json`: sellers, agents, comps and offers. `examples/listing-sample.json` shows the format with fake data.
+- `"family": true` on a seller gives a family-style opener.
+- `"callName": "Mom"` sets what the messages call that seller.
+
+## Privacy: this repo is public, your data isn't
+
+Real names, phone numbers, addresses and offers live only in `data/`, which git never sees. Two layers keep it that way:
+
+1. **`.gitignore`** keeps `data/` and `out/` out of every commit.
+2. **The commit guard** (`.githooks/pre-commit`) turns on the first time you run any command. Each time you commit, it reads your private terms from `data/` and blocks the commit if a staged file contains any of them. That covers seller, agent and customer names, phones and emails, street names, MLS numbers, and anything listed in `data/private-terms.txt`. It also blocks `data/` or `out/` files that were force-added. Warnings mask the value, and the list of terms is never committed.
+
+`npm run privacy` audits every file already in the repo. `npm run setup` turns the guard on by hand. Don't use `git commit --no-verify`; it skips the guard.
+
 ## All commands
 
 ```
@@ -148,6 +182,7 @@ sold <phone> / lost <phone> stop follow-ups for a lead
 reply <phone> <text>        log a text a customer sent you
 import <file.csv>           load or refresh leads
 consent <phone> --source "how they agreed"
+listing [new|price|signed|live|packet|status] <name>   price changes for a house you're selling
 optout <phone>              record a do-not-text you got by call or email
 handled <phone>             you answered; follow-ups may resume
 skip <id> [--why "..."]     drop a draft
