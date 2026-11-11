@@ -48,14 +48,21 @@ cat <<SH
 # Phone Agent: confirmations, reminders, receptionist, delivery check.
 # Written by deploy/install-mac.sh. Opens at login. Close this window to stop it.
 export PHONE_AGENT_DATA="$DATA" PHONE_AGENT_OUT="$OUT" TZ=America/New_York
-PIDFILE="$HOME/pa-live/auto.pid"
+LOCK="$HOME/pa-live/auto.lock"
 mkdir -p "$LOGS"
-if [ -f "\$PIDFILE" ] && kill -0 "\$(cat "\$PIDFILE")" 2>/dev/null; then
-  echo "Phone Agent is already running (pid \$(cat "\$PIDFILE")). Nothing to do."
-  sleep 4; exit 0
+# One copy only. mkdir is atomic, so two windows opening at once can't both win.
+if ! mkdir "\$LOCK" 2>/dev/null; then
+  OLD="\$(cat "\$LOCK/pid" 2>/dev/null)"
+  if [ -n "\$OLD" ] && kill -0 "\$OLD" 2>/dev/null; then
+    echo "Phone Agent is already running (pid \$OLD). Nothing to do."
+    sleep 4; exit 0
+  fi
+  rm -rf "\$LOCK"; mkdir "\$LOCK" || { echo "Another copy is starting. Nothing to do."; sleep 4; exit 0; }
 fi
-echo \$\$ > "\$PIDFILE"
-trap 'rm -f "\$PIDFILE"; pkill -P \$\$ 2>/dev/null' EXIT
+echo \$\$ > "\$LOCK/pid"
+stop_all() { pkill -f "cli.js auto --live" 2>/dev/null; rm -rf "\$LOCK"; exit 0; }
+trap stop_all INT TERM HUP
+trap 'rm -rf "\$LOCK"' EXIT
 cd "$REPO" || exit 1
 while true; do
   echo "\$(date '+%F %T') starting Phone Agent" | tee -a "$LOGS/auto.log"
@@ -80,12 +87,15 @@ launcher > "$LAUNCHER"
 chmod +x "$LAUNCHER"
 
 # One copy only: stop any sender started by hand, then start the new launcher.
+pkill -f "Start Phone Agent.command" 2>/dev/null || true
 pkill -f "cli.js auto --live" 2>/dev/null || true
-rm -f "$HOME/pa-live/auto.pid"
+rm -rf "$HOME/pa-live/auto.lock" "$HOME/pa-live/auto.pid"
 sleep 2
 
-osascript -e "tell application \"System Events\" to delete (every login item whose name is \"$ITEM\")" >/dev/null 2>&1 || true
-if osascript -e "tell application \"System Events\" to make login item at end with properties {path:\"$LAUNCHER\", hidden:false}" >/dev/null 2>&1; then
+# macOS may ask once to let this Terminal control System Events. Don't wait forever on it.
+with_timeout() { "$@" & local p=$!; ( sleep 60; kill $p 2>/dev/null ) & local w=$!; wait $p; local r=$?; kill $w 2>/dev/null; return $r; }
+with_timeout osascript -e "tell application \"System Events\" to delete (every login item whose name is \"$ITEM\")" >/dev/null 2>&1 || true
+if with_timeout osascript -e "tell application \"System Events\" to make login item at end with properties {path:\"$LAUNCHER\", hidden:false}" >/dev/null 2>&1; then
   echo "Opens by itself at login."
 else
   echo "Couldn't add the login item. Add it by hand: System Settings > General > Login Items > + > $LAUNCHER"
