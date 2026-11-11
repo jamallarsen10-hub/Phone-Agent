@@ -159,6 +159,25 @@ With only one of them, or with `KILL_SWITCH=true`, `auto` runs as a dry run: it 
 3. **Check what arrived on your phone.** It should be a green SMS bubble, not a blue iMessage. If it didn't arrive, or came as iMessage, stop. The one place to change is `APPLESCRIPT_LINES` in `src/providers/macMessages.js`.
 4. Only after that, switch to your real data folder.
 
+### Keep it running without touching the Mac
+
+```
+bash deploy/install-mac.sh
+```
+
+This rewrites `~/Start Phone Agent.command` and adds it as a Login Item, so the sender opens in a Terminal window by itself at login. It:
+
+- runs only one copy (double-clicking it again just says it's already running)
+- restarts the sender 10 minutes after it stops. A failed text is never resent.
+- keeps the Mac awake while it's plugged in, and logs to `~/pa-live/logs/auto.log`
+
+It runs in Terminal on purpose. The receptionist reads replies from the Messages database, which macOS only allows for apps with Full Disk Access, and Terminal has it. Giving Full Disk Access to `node` instead would give it to every Node program on the Mac, including Mac Remote's coding agent.
+
+- Keep the charger in and the lid open. A closed lid puts a MacBook to sleep no matter what.
+- Texts still need `"mode": "auto"` in `~/pa-live/data/config.json`. Without it, it's a dry run.
+- From your phone, `status` in Mac Remote's Pipeline chat shows the sender's pulse: running, SILENT (Mac asleep or offline), STOPPED after a failed text, or that it can't read replies.
+- `--dry-run` shows the launcher it would write. `--uninstall` stops it and removes the login item, leaving your data alone.
+
 ### If something goes wrong
 
 - Any error from Messages stops the run and marks that text **failed**. It is never retried automatically, because Messages can't confirm delivery and a retry could text a customer twice. Check Messages, then tap **Sent** or **Skip** in the Command Center.

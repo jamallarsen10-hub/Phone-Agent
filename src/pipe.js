@@ -5,6 +5,7 @@ import { openHandoffs } from "./store.js";
 import { toE164, prettyPhone } from "./phone.js";
 import { TEMPLATES } from "./templates.js";
 import { undelivered, deliverySummary } from "./delivery.js";
+import { readHeartbeat, heartbeatLine } from "./heartbeat.js";
 
 /**
  * The phone's way in: one line of plain text -> one fixed engine action -> a
@@ -131,7 +132,7 @@ function deliveryLine(d) {
   return `Delivery (7 days): ${d.delivered} delivered, ${d.accepted} sent as SMS, ${bad} didn't arrive${d.pending + d.unchecked ? `, ${d.pending + d.unchecked} checking` : ""}`;
 }
 
-export async function runPipe(text, store, { now, config, provider = null }) {
+export async function runPipe(text, store, { now, config, provider = null, dataDir = null }) {
   const ctx = { now, config };
   const { verb, rest } = parsePipe(text);
 
@@ -150,6 +151,7 @@ export async function runPipe(text, store, { now, config, provider = null }) {
         `Texts sent today: ${sentToday}. Replies waiting: ${openHandoffs(store).length}`,
         deliveryLine(deliverySummary(store, now)),
         `Mac sending: ${config.killSwitch ? "OFF (kill switch)" : config.mode === "auto" ? "armed" : "off (drafts mode)"}`,
+        ...(dataDir ? [heartbeatLine(readHeartbeat(dataDir), now)] : []),
       ].join("\n"),
       changed: false,
     };
