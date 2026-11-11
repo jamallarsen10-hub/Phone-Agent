@@ -159,6 +159,20 @@ With only one of them, or with `KILL_SWITCH=true`, `auto` runs as a dry run: it 
 3. **Check what arrived on your phone.** It should be a green SMS bubble, not a blue iMessage. If it didn't arrive, or came as iMessage, stop. The one place to change is `APPLESCRIPT_LINES` in `src/providers/macMessages.js`.
 4. Only after that, switch to your real data folder.
 
+### Keep it running without touching the Mac
+
+```
+bash deploy/install-mac.sh
+```
+
+This installs `auto --live` as a background service (`com.jamal.followup-auto`) that starts at login, restarts itself, and keeps the Mac awake while it's plugged in. Leads and settings live in `~/pa-live/data` (the same folder Mac Remote's Pipeline agent uses), logs in `~/pa-live/logs`.
+
+- Keep the charger in and the lid open. A closed lid puts a MacBook to sleep no matter what.
+- Texts still need `"mode": "auto"` in `~/pa-live/data/config.json`. Without it the service is a dry run.
+- From your phone, `status` in Mac Remote's Pipeline chat shows the sender's pulse: running, SILENT (Mac asleep or offline), or STOPPED after a failed text.
+- After a failed text the service waits 10 minutes before starting again. The failed text is never resent.
+- `bash deploy/install-mac.sh --dry-run` shows what it would do. `--uninstall` removes it and leaves your data alone.
+
 ### If something goes wrong
 
 - Any error from Messages stops the run and marks that text **failed**. It is never retried automatically, because Messages can't confirm delivery and a retry could text a customer twice. Check Messages, then tap **Sent** or **Skip** in the Command Center.

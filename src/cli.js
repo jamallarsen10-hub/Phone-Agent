@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { writeHeartbeat } from "./heartbeat.js";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -268,7 +269,7 @@ async function main() {
       try {
         const out = await withStoreLock(DATA, async () => {
           const s = loadStore(DATA);
-          const r = await runPipe(text, s, { now, config, provider });
+          const r = await runPipe(text, s, { now, config, provider, dataDir: DATA });
           if (r.changed) saveStore(DATA, s);
           return r;
         });
@@ -296,6 +297,7 @@ async function main() {
       let lastSync = -Infinity;
       const shown = new Set();
       let first = true;
+      let sentToday = 0, sentDay = "";
 
       for (;;) {
         const t = flags.now ? now : new Date();
@@ -324,6 +326,16 @@ async function main() {
             `${stamp} first pass: ${rep.sent.length + rep.wouldSend.length} ready, ${rep.held.length} held${held.length ? " (" + [...new Set(held)].join("; ") + ")" : ""}, ${rep.notAuto.length} left as drafts for you.`
           );
           first = false;
+        }
+        const day = stamp.slice(0, 10);
+        if (day !== sentDay) { sentDay = day; sentToday = 0; }
+        sentToday += rep.sent.length;
+        try {
+          writeHeartbeat(DATA, rep.stop
+            ? { at: stamp, live: state.live, state: "stopped", note: (rep.failed[0] && String(rep.failed[0].detail).slice(0, 80)) || "send failed", sentToday }
+            : { at: stamp, live: state.live, state: "ok", sentToday });
+        } catch (e) {
+          console.error(`heartbeat not written: ${e.message}`);
         }
         if (rep.stop) fail("Stopped after a failed send. Fix Messages, then start auto again.");
         if (flags.once) return;

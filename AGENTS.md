@@ -17,6 +17,7 @@ Every AI working here (Claude, DeepSeek, ChatGPT, others) follows this:
 
 Rollback points:
 - `rollback/2026-10-21-before-phone-control` = `5ac4c24`, the engine before phone commands (`pipe`) and the save lock
+- `rollback/2026-11-11-before-mac-service` = `422213e`, before the always-on Mac installer and the sender heartbeat
 
 **Which repo is which (GitHub ignores capital letters):**
 - This repo (`jamallarsen10-hub/Phone-Agent`) = the customer **Follow-up Engine**.

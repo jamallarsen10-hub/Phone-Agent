@@ -4,6 +4,7 @@ import { sendDraft } from "./send.js";
 import { openHandoffs } from "./store.js";
 import { toE164, prettyPhone } from "./phone.js";
 import { TEMPLATES } from "./templates.js";
+import { readHeartbeat, heartbeatLine } from "./heartbeat.js";
 
 /**
  * The phone's way in: one line of plain text -> one fixed engine action -> a
@@ -118,7 +119,7 @@ function why(r) {
   return map[r.reason] || [r.reason, r.detail].filter(Boolean).join(": ").toLowerCase();
 }
 
-export async function runPipe(text, store, { now, config, provider = null }) {
+export async function runPipe(text, store, { now, config, provider = null, dataDir = null }) {
   const ctx = { now, config };
   const { verb, rest } = parsePipe(text);
 
@@ -136,6 +137,7 @@ export async function runPipe(text, store, { now, config, provider = null }) {
         `Sold: ${leads.filter((l) => l.stage === "Sold").length}. Lost: ${leads.filter((l) => l.stage === "Lost").length}`,
         `Texts sent today: ${sentToday}. Replies waiting: ${openHandoffs(store).length}`,
         `Mac sending: ${config.killSwitch ? "OFF (kill switch)" : config.mode === "auto" ? "armed" : "off (drafts mode)"}`,
+        ...(dataDir ? [heartbeatLine(readHeartbeat(dataDir), now)] : []),
       ].join("\n"),
       changed: false,
     };
