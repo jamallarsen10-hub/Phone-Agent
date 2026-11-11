@@ -60,13 +60,20 @@ if ! mkdir "\$LOCK" 2>/dev/null; then
   rm -rf "\$LOCK"; mkdir "\$LOCK" || { echo "Another copy is starting. Nothing to do."; sleep 4; exit 0; }
 fi
 echo \$\$ > "\$LOCK/pid"
-stop_all() { pkill -f "cli.js auto --live" 2>/dev/null; rm -rf "\$LOCK"; exit 0; }
-trap stop_all INT TERM HUP
-trap 'rm -rf "\$LOCK"' EXIT
+CHILD=""
+# Only ever touch this copy's own lock and its own sender.
+release_lock() { [ "\$(cat "\$LOCK/pid" 2>/dev/null)" = "\$\$" ] && rm -rf "\$LOCK"; }
+stop_own() { [ -n "\$CHILD" ] && { pkill -TERM -P "\$CHILD" 2>/dev/null; kill "\$CHILD" 2>/dev/null; }; release_lock; exit 0; }
+trap stop_own INT TERM HUP
+trap release_lock EXIT
 cd "$REPO" || exit 1
+echo "Phone Agent is running. Close this window to stop it. Log: $LOGS/auto.log"
 while true; do
-  echo "\$(date '+%F %T') starting Phone Agent" | tee -a "$LOGS/auto.log"
-  /usr/bin/caffeinate -is "$NODE" src/cli.js auto --live 2>&1 | tee -a "$LOGS/auto.log"
+  echo "\$(date '+%F %T') starting Phone Agent" >> "$LOGS/auto.log"
+  /usr/bin/caffeinate -is "$NODE" src/cli.js auto --live >> "$LOGS/auto.log" 2>&1 &
+  CHILD=\$!
+  wait "\$CHILD"
+  CHILD=""
   echo "\$(date '+%F %T') Phone Agent stopped. Restarting in 10 minutes. A failed text is never resent." | tee -a "$LOGS/auto.log"
   sleep 600
 done
